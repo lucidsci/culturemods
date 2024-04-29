@@ -55,7 +55,7 @@ def time_to_constrained(ocr, media_vol_uL=100, c_sat=185):
     tmax_hrs = 24
     q = ocr*1e-3
     for t_s in range(8*3600):
-        c = concentration_eq23_mm(0, t_s, q, c_initial=c_sat, media_height_mm=h)
+        c = concentration(0, t_s, q, c_initial=c_sat, media_height=h)
         if c <= 0:
             return t_s
 
@@ -126,3 +126,13 @@ if __name__ == '__main__':
 
     plot_gradient_evolution()
     plt.show()
+
+    ocrs = list(range(50, 400, 10))
+    for vol in [100, 150, 200]:
+        times = [time_to_constrained(ocr, vol) for ocr in ocrs]
+        t_hrs = [t/3600 if t is not None else None for t in times]
+        plt.plot(ocrs, t_hrs, label="{} uL".format(vol))
+    plt.xlabel("OCR (fmols/mm2/s)")
+    plt.ylabel("Time to Diffusion-Limit (hrs)")
+    plt.legend()
+    plt.title("Time to OCR Diffusion Limit")
