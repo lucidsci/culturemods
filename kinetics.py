@@ -4,8 +4,7 @@
 """
 import math
 
-#from "Kinetics of Gas Diffusion in Mammalian Cell Culture Systems" - McLimans, Blumension, Tunnah
-#equations 23,24
+#from "Kinetics of Gas Diffusion in Mammalian Cell Culture Systems" - McLimans, Blumension, Tunnah. 1968. 
 MONOLAYER_THICKNESS_MM=0
 DEFAULT_HEIGHT_MM=3.1
 #o2 diffusion coefficient
@@ -28,8 +27,11 @@ def summation(x, t, a=DEFAULT_HEIGHT_MM, s=MONOLAYER_THICKNESS_MM, iterations=10
 
 def concentration(x, t, Q=5, c_initial = 200, media_height=DEFAULT_HEIGHT_MM):
     """
-    Q is flux in mols/cm2/sec
-    c_initial is o2 concentration in molar
+    Calculate concentration over time at given height/depth based on Eq. 23 from 
+    "Kinetics of Gas Diffusion in Mammalian Cell Culture Sytems".  McLimans, et. al.  1968.
+
+    Q is flux in umols/mm2/sec
+    c_initial is o2 concentration in micromolar
     media_height in centimeters
     """
     a = media_height #reference uses 'a' for fluid height
@@ -43,7 +45,7 @@ def concentration(x, t, Q=5, c_initial = 200, media_height=DEFAULT_HEIGHT_MM):
 def flux_units_convert(flux_fmols_mm_sq_per_sec):
     """
     convert flux from 'normal' of fmols/mm2/sec to
-    units the model expects of umolar/mm2/sec
+    units the model expects of umols/mm2/sec
     """
     q = flux_fmols_mm_sq_per_sec * 1e-3
     return q
