@@ -102,3 +102,27 @@ if __name__ == '__main__':
     plt.legend()
     plt.title("O2 at 1.25mm by media volume with OCR={} fmols/mm2/s".format(ocr))
     plt.show()
+
+    def plot_gradient_evolution(ocr=100, media_height=3.1, c_sat=185, tmax_hrs=1, delta_t_mins=15):
+        nz = 20
+
+        for t in range(0, 3600*tmax_hrs, delta_t_mins*60):#[3600*hr for hr in range(5)]:
+            cs = []
+            hs = []
+            t_min = t//60
+            for z_i in range(nz):
+                h = z_i * media_height / nz
+                #q = flux_units_convert(ocr)
+                #print(q)
+                q = ocr * 1e-3  #fmtomols/mm3 to micromolar
+                #ts = list(range(0, 3600*24, 10))
+                c = concentration(h, t, q, c_initial=c_sat, media_height=media_height)
+                cs.append(c)
+                hs.append(h)
+            plt.plot(hs, cs, label="t={} mins".format(t_min))
+            plt.legend()
+            #plt.ylim(0, 200)
+            plt.title("Gradient over Time (OCR={} fmols/mm2/s) media height {}mm".format(ocr, media_height))
+
+    plot_gradient_evolution()
+    plt.show()
