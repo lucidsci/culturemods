@@ -15,12 +15,13 @@ def media_vol_to_height(vol_uL, well_radius_mm=3.2):
     return vol_uL / (math.pi * well_radius_mm**2)
 
 @cmds.command()
-@click.argument('ocrs', nargs=-1)
-@click.option('--vol', default=100)
-@click.option('--csat', default=185)
+@click.argument('ocrs', nargs=-1, type=int)
+@click.option('--vol', default=100, type=int)
+@click.option('--csat', default=185, type=int)
 def o2_at_bottom_by_ocr(ocrs, vol=100, csat=185):
     height = media_vol_to_height(vol)
-    for ocr in [50, 100, 150, 200, 300]:
+    print(ocrs)
+    for ocr in ocrs:
         q = kinetics.flux_units_convert(ocr)
         ts = list(range(0, 3600*4, 1))
         cs = [kinetics.concentration(0, t, q, c_initial=csat, media_height=height) for t in ts]
@@ -31,6 +32,26 @@ def o2_at_bottom_by_ocr(ocrs, vol=100, csat=185):
     
     plt.legend()
     plt.title("O2 at bottom by OCR in {} uL".format(vol))
+    plt.show()
+
+@cmds.command()
+@click.argument('ocrs', nargs=-1, type=int)
+@click.option('--position', default=1.25)
+@click.option('--vol', default=100, type=int)
+@click.option('--csat', default=185, type=int)
+def o2_at_position_by_ocr(ocrs, position=1.25, vol=100, csat=185):
+    height = media_vol_to_height(vol)
+    for ocr in ocrs:
+        q = kinetics.flux_units_convert(ocr)
+        ts = list(range(0, 3600*4, 1))
+        cs = [kinetics.concentration(position, t, q, c_initial=csat, media_height=height) for t in ts]
+        plt.plot([t/3600 for t in ts], cs, label="OCR={}".format(ocr))
+        plt.xlabel("Time (hours)")
+        plt.ylabel("O2 (micromolar)")
+        plt.ylim(0, 200)
+    
+    plt.legend()
+    plt.title("O2 at {}mm above cells by OCR in {} uL".format(position, vol))
     plt.show()
    
 if __name__ == '__main__':
