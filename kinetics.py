@@ -52,12 +52,12 @@ def flux_units_convert(flux_fmols_mm_sq_per_sec):
 def media_vol_to_height(vol_uL, well_radius_mm=3.2):
     return vol_uL / (math.pi * well_radius_mm**2)
 
-def time_to_constrained(ocr, media_vol_uL=100, c_sat=185):
+def time_to_constrained(ocr, media_vol_uL=100, csat=185):
     h = media_vol_to_height(media_vol_uL)
     tmax_hrs = 24
     q = ocr*1e-3
     for t_s in range(8*3600):
-        c = concentration(0, t_s, q, c_initial=c_sat, media_height=h)
+        c = concentration(0, t_s, q, c_initial=csat, media_height=h)
         if c <= 0:
             return t_s
 
@@ -105,7 +105,7 @@ if __name__ == '__main__':
     plt.title("O2 at 1.25mm by media volume with OCR={} fmols/mm2/s".format(ocr))
     plt.show()
 
-    def plot_gradient_evolution(ocr=100, media_height=3.1, c_sat=185, tmax_hrs=1, delta_t_mins=15):
+    def plot_gradient_evolution(ocr=100, media_height=3.1, csat=185, tmax_hrs=1, delta_t_mins=15):
         nz = 20
 
         for t in range(0, 3600*tmax_hrs, delta_t_mins*60):#[3600*hr for hr in range(5)]:
@@ -118,7 +118,7 @@ if __name__ == '__main__':
                 #print(q)
                 q = ocr * 1e-3  #fmtomols/mm3 to micromolar
                 #ts = list(range(0, 3600*24, 10))
-                c = concentration(h, t, q, c_initial=c_sat, media_height=media_height)
+                c = concentration(h, t, q, c_initial=csat, media_height=media_height)
                 cs.append(c)
                 hs.append(h)
             plt.plot(hs, cs, label="t={} mins".format(t_min))
