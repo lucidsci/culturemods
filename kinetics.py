@@ -8,7 +8,7 @@ import math
 MONOLAYER_THICKNESS_MM=0
 DEFAULT_HEIGHT_MM=3.1
 #o2 diffusion coefficient
-O2_DIFFUSION_37C = 3e-3 #in mm2/s
+O2_DIFFUSION_37C = 3.2e-3 #in mm2/s
 
 def H(n, a , s=MONOLAYER_THICKNESS_MM):
     #calculate  H_n from eq 19 where a is fluid height and s is monolayer thickness
