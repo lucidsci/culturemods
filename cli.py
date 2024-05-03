@@ -38,6 +38,52 @@ def o2_at_bottom_by_ocr(ocrs, vol=100, csat=185):
     plt.show()
 
 @cmds.command()
+@click.argument('vols', nargs=-1, type=int)
+@click.option('--ocr', default=100, type=int)
+@click.option('--csat', default=185, type=int)
+def o2_at_bottom_by_vol(vols, ocr=100, csat=185):
+    if len(vols) == 0:
+        vols = [50, 100, 150, 200]
+
+    q = kinetics.flux_units_convert(ocr)
+    for vol in vols:
+        height = media_vol_to_height(vol)
+        ts = list(range(0, 3600*4, 1))
+        cs = [kinetics.concentration(0, t, q, c_initial=csat, media_height=height) for t in ts]
+        plt.plot([t/3600 for t in ts], cs, label="vol={}uL".format(vol))
+        plt.xlabel("Time (hours)")
+        plt.ylabel("O2 (micromolar)")
+        plt.ylim(0, csat)
+    
+    plt.legend()
+    plt.title("O2 at bottom by volume (OCR={})".format(ocr))
+    plt.show()
+
+@cmds.command()
+@click.argument('vols', nargs=-1, type=int)
+@click.option('--position', default=1.25)
+@click.option('--ocr', default=100, type=int)
+@click.option('--csat', default=185, type=int)
+def o2_at_position_by_vol(vols, position=1.25, ocr=100, csat=185):
+    if len(vols) == 0:
+        vols = [50, 100, 150, 200]
+
+    q = kinetics.flux_units_convert(ocr)
+    for vol in vols:
+        height = media_vol_to_height(vol)
+        ts = list(range(0, 3600*4, 1))
+        cs = [kinetics.concentration(position, t, q, c_initial=csat, media_height=height) for t in ts]
+        plt.plot([t/3600 for t in ts], cs, label="vol={}uL".format(vol))
+        plt.xlabel("Time (hours)")
+        plt.ylabel("O2 (micromolar)")
+        plt.ylim(0, csat)
+    
+    plt.legend()
+    plt.title("O2 at {}mm by volume (OCR={})".format(position, ocr))
+    plt.show()
+
+
+@cmds.command()
 @click.argument('ocrs', nargs=-1, type=int)
 @click.option('--position', default=1.25)
 @click.option('--vol', default=100, type=int)
