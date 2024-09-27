@@ -63,6 +63,16 @@ def time_to_constrained(ocr, media_vol_uL=100, csat=185):
 
     return None
 
+
+def max_flux(vol=100, sat=200, D=3.2e-03):
+    h = media_vol_to_height(vol)
+    dC = sat
+    return 1e3*D*dC/h
+
+def steady_state_o2_at_pos(flux, D = 3.2e-03, o2_sat = 200, media_height=3.1, pos_above_bottom=0):
+    dC = (media_height-pos_above_bottom)*flux/D/1000
+    return min(o2_sat - dC, o2_sat)
+
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
     for ocr in [50, 100, 150, 200, 300]:
