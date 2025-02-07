@@ -1,5 +1,9 @@
 """
 discrete column simulation
+
+references:
+http://hplgit.github.io/num-methods-for-PDEs/doc/pub/diffu/
+
 """
 import numpy as np
 # Numerical solution using finite difference method
@@ -13,8 +17,9 @@ class ReactionDiffusion1DParams:
     C0=200
     Cs=200
     
-    def height_to_z_index(self, height_mm):
-        return height_mm / self.Nz
+    def depth_to_z_index(self, depth_mm):
+        dz = self.L / (self.Nz - 1) 
+        return int (depth // dz)
 
 def params_from_well_model(csat=200, c_0=200, media_volume_uL=100, D=3.2e-3):
     pass
@@ -71,37 +76,73 @@ class ReactionDiffusion1DModel:
             C = C_new  # Update concentration
             yield C.copy()
             #C_results.append(C.copy())
+
+def calc_parameterized(rates, volumes=[100], heights=[1], downsample_factor=100):
+    pts = []
+    for media_vol in volumes:
+        for ocr in rates:
+            rate = flux_units_convert(ocr)
+            rate_profile = ConstantRateProfile(rate)
+            params = ReactionDiffusion1DParams()
+            params.L = media_vol_to_height(media_vol)
+            model = ReactionDiffusion1DModel(params)
+            media_height = media_vol_to_height(media_vol)
+            dz = params.L / (params.Nz - 1)
+            for t_i, concentrations in enumerate(model.run_fdm(rate_profile)):
+                for h in heights:
+                    depth = media_height - h
+                    z_i = int (depth // dz)
+                    t = t_i * params.dt
+
+                    if t_i % downsample_factor == 0:
+                        pt = {'ocr': ocr, 'rate': rate, 't_seconds': t, 
+                              'c_at_z': concentrations[z_i], 'depth': depth, 'height': h, 'media_vol': media_vol}
+                        pts.append(pt)
+    return pts
     
+
 if __name__ == '__main__':
     # Plot results
     import matplotlib.pyplot as plt
     from kinetics import media_vol_to_height, flux_units_convert
-        
-    pts = []
-    for ocr in [1, 5, 10, 50]:
-        rate = flux_units_convert(ocr)
-        rate_profile = ConstantRateProfile(rate)
-        params = ReactionDiffusion1DParams()
-        model = ReactionDiffusion1DModel(params)
-
-        dz = params.L / (params.Nz - 1)
-        heights = [0.5, 1, 1.5, 2, 2.5]
-        for t_i, concentrations in enumerate(model.run_fdm(rate_profile)):
-            for h in heights:
-                #z_i = int(h // params.Nz)
-                z_i = int (h // dz)
-                t = t_i * params.dt
-
-                if t_i % 100 == 0:
-                    pt = {'ocr': ocr, 'rate': rate, 't_seconds': t, 
-                          'c_at_z': concentrations[z_i], 'height_mm': h}
-                    pts.append(pt)
     
+    if False:
+        RAPID_REACTION_RATES = [200, 300, 400]
+        pts = []
+        for media_vol in [100, 200, 300]:
+            for ocr in [5, 25, 50, 100, 200, 400]:
+                rate = flux_units_convert(ocr)
+                rate_profile = ConstantRateProfile(rate)
+                params = ReactionDiffusion1DParams()
+                params.L = media_vol_to_height(media_vol)
+                model = ReactionDiffusion1DModel(params)
+                media_height = media_vol_to_height(media_vol)
+                dz = params.L / (params.Nz - 1)
+                depths = [0.5, 1, 1.5, 2, 2.5]
+                for t_i, concentrations in enumerate(model.run_fdm(rate_profile)):
+                    for d in depths:
+                        #z_i = int(h // params.Nz)
+                        z_i = int (d // dz)
+                        t = t_i * params.dt
+
+                        #height from bottom
+                        h = media_height - d
+
+                        if t_i % 100 == 0:
+                            pt = {'ocr': ocr, 'rate': rate, 't_seconds': t, 
+                                  'c_at_z': concentrations[z_i], 'depth': d, 'height': h, 'media_vol': media_vol}
+                            pts.append(pt)
+        
     import pandas as pd
     import seaborn as sns
-
+    
+    pts = calc_parameterized([5, 25, 50, 100, 200, 400])
     df_all = pd.DataFrame(pts)
     df_all['t_mins'] = df_all['t_seconds'] / 60
+
+    ax = sns.relplot(x='t_mins', y='c_at_z', hue='ocr', col='height', data=df_all, kind='line',  row='media_vol')
+    plt.ylim(0, 210)
+    plt.show()
 
     #df_rs = 
     if False:
