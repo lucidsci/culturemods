@@ -4,6 +4,8 @@ discrete column simulation
 references:
 http://hplgit.github.io/num-methods-for-PDEs/doc/pub/diffu/
 
+TODO - uncertainty eval based on height positional error, volume, concentration, D, and temperature
+TODO - first order reaction rate model
 """
 import numpy as np
 # Numerical solution using finite difference method
@@ -31,7 +33,14 @@ class ConstantRateProfile:
     def __init__(self, reaction_consumption_rate=0.1):
         self.rate = reaction_consumption_rate
 
-    def reaction_at_height_time(self, z, t):
+    def reaction_at_height_time(self, z, t, c):
+        return self.rate
+
+class FirstOrderRateProfile:
+    def __init__(self, reaction_consumption_rate=0.1):
+        self.rate = reaction_consumption_rate
+
+    def reaction_at_height_time(self, z, t, c):
         return self.rate
 
 #simulates concentration over time based on 1D diffusion and reaction model
@@ -66,7 +75,7 @@ class ReactionDiffusion1DModel:
             C_new = C.copy()
             for i in range(1, Nz - 1):  # Exclude boundaries
                 d2C_dz2 = (C[i + 1] - 2 * C[i] + C[i - 1]) / dz**2
-                reaction_rate = rate_profile.reaction_at_height_time(z[i], t[n])
+                reaction_rate = rate_profile.reaction_at_height_time(z[i], t[n], C[i])
                 C_new[i] = C[i] + dt * (D * d2C_dz2 - reaction_rate)
 
             # Apply boundary conditions
@@ -77,7 +86,7 @@ class ReactionDiffusion1DModel:
             yield C.copy()
             #C_results.append(C.copy())
 
-def calc_parameterized(rates, volumes=[100], heights=[1], downsample_factor=100):
+def calc_parameterized(rates, volumes=[100], heights=[1], downsample_factor=100, Nt=60000):
     pts = []
     for media_vol in volumes:
         for ocr in rates:
@@ -85,6 +94,7 @@ def calc_parameterized(rates, volumes=[100], heights=[1], downsample_factor=100)
             rate_profile = ConstantRateProfile(rate)
             params = ReactionDiffusion1DParams()
             params.L = media_vol_to_height(media_vol)
+            params.Nt = Nt
             model = ReactionDiffusion1DModel(params)
             media_height = media_vol_to_height(media_vol)
             dz = params.L / (params.Nz - 1)
@@ -143,6 +153,16 @@ if __name__ == '__main__':
     ax = sns.relplot(x='t_mins', y='c_at_z', hue='ocr', col='height', data=df_all, kind='line',  row='media_vol')
     plt.ylim(0, 210)
     plt.show()
+    
+    def _plot_by_rates(rates, volume=300, height=1, downsample_factor=100, Nt=60000):
+        pts = calc_parameterized(rates, volumes=[volume], heights=[height], Nt=Nt)
+        df_all = pd.DataFrame(pts)
+        df_all['t_mins'] = df_all['t_seconds'] / 60
+
+        ax = sns.lineplot(x='t_mins', y='c_at_z', hue='ocr', data=df_all)
+        plt.ylim(0, None)
+        plt.show()
+
 
     #df_rs = 
     if False:
