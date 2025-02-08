@@ -11,17 +11,43 @@ import numpy as np
 # Numerical solution using finite difference method
 
 class ReactionDiffusion1DParams:
-    Nz = 100  # Number of spatial steps
+    Nz = 100 # Number of spatial steps
     Nt = 50000  # Number of time steps
-    dt = .1  # Time step size
-    L = 3.1*3 #media height
-    D = 3.2e-3
-    C0=200
+    dt = .1  # time step seconds
+    L = 3.1 #media height mm
+    D = 3.2e-3 #diffion coefficient mm2/s
+    C0=200 
     Cs=200
     
+    def validate(self):
+        # Stability condition (for explicit method)
+        dz = self.calc_dz()
+        D_max = (dz**2) / (2 * self.D)
+        if self.dt > D_max:
+            raise Exception(f'dt too big - D max is {D_max}')
+            self.dt = 0.5 * D_max  # Adjust time step for stability
+
     def depth_to_z_index(self, depth_mm):
-        dz = self.L / (self.Nz - 1) 
-        return int (depth // dz)
+        dz = self.calc_dz()
+        return int (depth_mm // dz)
+    
+    def calc_dz(self):
+        #steps per discretized simulated height
+        return self.L / (self.Nz - 1) 
+    
+    def dz_volume_uL(self):
+        #volume represented by each discreteized simulated column height step
+        # since we are using mm2 for diffusion/flux and mm for height
+        # the volume in uL is simply 1 mm2 times the discretized vertical step
+        # dz
+        return self.calc_dz() #dz in mm3 (uL)
+
+    def normalized_reaction_rate(self, rate_mols_per_L_per_hour):
+        #convert reaction rate in mols/L/hour to discretized units of 
+        # umolar/step
+        rate_umolar_per_s = rate_mols_per_L_per_hour / 3600
+        dC_dt = rate_umolar_per_s * self.dt 
+        return dC_dt #umolar per step
 
 def params_from_well_model(csat=200, c_0=200, media_volume_uL=100, D=3.2e-3):
     pass
@@ -31,9 +57,11 @@ def R(z, t):
 
 class ConstantRateProfile:
     def __init__(self, reaction_consumption_rate=0.1):
+        #reaction rate in mols/L/hour
         self.rate = reaction_consumption_rate
 
     def reaction_at_height_time(self, z, t, c):
+        #reaction rate in mols/L/hour
         return self.rate
 
 class FirstOrderRateProfile:
@@ -49,21 +77,19 @@ class FirstOrderRateProfile:
 class ReactionDiffusion1DModel:
     def __init__(self, params: ReactionDiffusion1DParams):
         self.params = params
+        self.params.validate()
 
     def run_fdm(self, rate_profile=ConstantRateProfile()):
         p = self.params
         D = p.D
         dz = p.L / (p.Nz - 1)  # Spatial step size
-        dt = p.dt
+        dt = p.dt #discrete timestep size in seconds
         L = p.L
         C0 = p.C0
         Cs = p.Cs
         Nz = p.Nz
         Nt = p.Nt
-        # Stability condition (for explicit method)
-        D_max = (dz**2) / (2 * D)
-        if dt > D_max:
-            dt = 0.5 * D_max  # Adjust time step for stability
+
     
         # Create grids
         z = np.linspace(0, L, Nz)
@@ -75,8 +101,19 @@ class ReactionDiffusion1DModel:
             C_new = C.copy()
             for i in range(1, Nz - 1):  # Exclude boundaries
                 d2C_dz2 = (C[i + 1] - 2 * C[i] + C[i - 1]) / dz**2
+
+                #get reaction rate in mols/L/hour from profile
                 reaction_rate = rate_profile.reaction_at_height_time(z[i], t[n], C[i])
-                C_new[i] = C[i] + dt * (D * d2C_dz2 - reaction_rate)
+                
+                #normalize reaction rate to discretized step rate to get
+                # change in dC due to per-cell reaction (i.e. consumption or
+                # production)
+                R_dC = self.params.normalized_reaction_rate(reaction_rate)
+
+                #change in concentration due to diffusive flux
+                J_dC = dt*D*d2C_dz2
+        
+                C_new[i] = C[i] + J_dC - R_dC
 
             # Apply boundary conditions
             C_new[0] = Cs  # Fixed concentration at the top
@@ -86,11 +123,15 @@ class ReactionDiffusion1DModel:
             yield C.copy()
             #C_results.append(C.copy())
 
+try:
+    from kinetics import media_vol_to_height
+except:
+    from culturemods.kinetics import media_vol_to_height
+
 def calc_parameterized(rates, volumes=[100], heights=[1], downsample_factor=100, Nt=60000):
     pts = []
     for media_vol in volumes:
-        for ocr in rates:
-            rate = flux_units_convert(ocr)
+        for rate in rates:
             rate_profile = ConstantRateProfile(rate)
             params = ReactionDiffusion1DParams()
             params.L = media_vol_to_height(media_vol)
@@ -105,7 +146,7 @@ def calc_parameterized(rates, volumes=[100], heights=[1], downsample_factor=100,
                     t = t_i * params.dt
 
                     if t_i % downsample_factor == 0:
-                        pt = {'ocr': ocr, 'rate': rate, 't_seconds': t, 
+                        pt = {'rate': rate, 't_seconds': t, 
                               'c_at_z': concentrations[z_i], 'depth': depth, 'height': h, 'media_vol': media_vol}
                         pts.append(pt)
     return pts
@@ -114,14 +155,18 @@ def calc_parameterized(rates, volumes=[100], heights=[1], downsample_factor=100,
 if __name__ == '__main__':
     # Plot results
     import matplotlib.pyplot as plt
-    from kinetics import media_vol_to_height, flux_units_convert
+    from kinetics import media_vol_to_height
     
+    #example reaction rates in mols/L/hr
+    ALGAL_REACTION_RATES = [5e-4, 1e-3, 2e-3, 3e-3] #Quant of OPR.  Schwerna, hubner, et al
+
+    #ENZYMATIC_REACTION_RATES = [200, 300, 400]
+
     if False:
         RAPID_REACTION_RATES = [200, 300, 400]
         pts = []
         for media_vol in [100, 200, 300]:
-            for ocr in [5, 25, 50, 100, 200, 400]:
-                rate = flux_units_convert(ocr)
+            for rate in [5, 25, 50, 100, 200, 400]:
                 rate_profile = ConstantRateProfile(rate)
                 params = ReactionDiffusion1DParams()
                 params.L = media_vol_to_height(media_vol)
@@ -139,18 +184,20 @@ if __name__ == '__main__':
                         h = media_height - d
 
                         if t_i % 100 == 0:
-                            pt = {'ocr': ocr, 'rate': rate, 't_seconds': t, 
+                            pt = {'rate': rate, 't_seconds': t, 
                                   'c_at_z': concentrations[z_i], 'depth': d, 'height': h, 'media_vol': media_vol}
                             pts.append(pt)
         
     import pandas as pd
     import seaborn as sns
     
-    pts = calc_parameterized([5, 25, 50, 100, 200, 400])
+    pts = calc_parameterized(ALGAL_REACTION_RATES, 
+                             volumes=[300], downsample_factor=60*15, Nt=3600*10*12)
     df_all = pd.DataFrame(pts)
     df_all['t_mins'] = df_all['t_seconds'] / 60
+    df_all['t_hrs'] = df_all['t_seconds'] / 3600
 
-    ax = sns.relplot(x='t_mins', y='c_at_z', hue='ocr', col='height', data=df_all, kind='line',  row='media_vol')
+    ax = sns.relplot(x='t_hrs', y='c_at_z', hue='rate', col='height', data=df_all, kind='line',  row='media_vol')
     plt.ylim(0, 210)
     plt.show()
     
@@ -159,9 +206,11 @@ if __name__ == '__main__':
         df_all = pd.DataFrame(pts)
         df_all['t_mins'] = df_all['t_seconds'] / 60
 
-        ax = sns.lineplot(x='t_mins', y='c_at_z', hue='ocr', data=df_all)
+        ax = sns.lineplot(x='t_mins', y='c_at_z', hue='rate', data=df_all)
         plt.ylim(0, None)
         plt.show()
+    
+    ALGAL_PRODUCTION_RATES = [-5e-4, -1e-3, -2e-3, -3e-3]
 
 
     #df_rs = 
