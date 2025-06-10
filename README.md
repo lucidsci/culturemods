@@ -9,4 +9,7 @@ This will plot the O2 at 1.25mm above thee well bottom for a media volume of 100
 
 ![O2 over time](https://github.com/lucidsci/culturemods/blob/master/examples/o2_at_1250um.png)
 
+The 1D kinetics model is described in the following paper:
+
+Mclimans, William F., Leslie E. Blumenson and Kenneth Tunnah. “Kinetics of gas diffusion in mammalian cell culture systems. II. Theory.” Biotechnology and Bioengineering 10 (1968): n. pag.
 
