@@ -6,8 +6,8 @@ from mpl_toolkits.mplot3d import Axes3D
 from fipy import CylindricalGrid1D, CellVariable, TransientTerm, DiffusionTerm, ImplicitSourceTerm
 
 # Physical parameters (converted to mm units)
-D = 3e-3  # Oxygen diffusion coefficient in water (mm^2/s)
-k = 1e-4  # Oxygen consumption rate (1/s)
+D = 3e-3  # Oxygen diffusion coefficient in water (fmols/mm^2/s)
+ocr = 1  # Oxygen consumption rate (fmols/mm2/s)
 C_air = 200.0  # Oxygen concentration at air interface (µM, ~8.5 mg/L)
 
 # Geometry
@@ -45,6 +45,8 @@ total_time = dt * steps
 # TransientTerm for dC/dt
 # DiffusionTerm for D * d²C/dz²
 # ImplicitSourceTerm for -k*C (consumption)
+k = D*ocr
+
 eq = (TransientTerm() == DiffusionTerm(coeff=D) - ImplicitSourceTerm(coeff=k))
 
 # Storage for plotting
