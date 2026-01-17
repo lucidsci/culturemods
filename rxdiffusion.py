@@ -102,6 +102,7 @@ class ReactionDiffusion1DParams:
         return dC_dT #umolar per step
 
 class ConstantRateUniformHeightProfile:
+    first_order = False
     def __init__(self, reaction_consumption_rate=1):
         #reaction rate in mols/L/hour
         self.rate = reaction_consumption_rate
@@ -115,7 +116,9 @@ class ConstantRateUniformHeightProfile:
 
 
 class FirstOrderRateProfile:
+    first_order = True
     def __init__(self, k=1):
+        #k is reaction rate cosntant in 1/s
         self.k = k
 
     def reaction_at_time(self, t, c):
@@ -129,6 +132,7 @@ class MichaelisMentenRateProfile:
         self.v_max = v_max
         self.K_m = K_m
 
+    #FIXME - get normalized rate k for first order sim
     def reaction_at_time(self, t, c):
         return (self.v_max * c) / (self.K_m + c)
 
@@ -149,38 +153,35 @@ class ReactionDiffusion1DModel:
         # we don't know enough to determine if time step is too large
         #self.params.validate()
 
-    def _rate_to_fipy_k(self, rate_profile):
+    def normalize_rate(self, rate_profile):
         """
-        Convert rate profile to FiPy k parameter.
+        Convert rate profile to normalized rate k
 
-        The FiPy model uses normalized concentration C* = C/C_air, so the
-        consumption rate k must be normalized: k = R / C_air where R is in uM/s.
+        The FiPy model uses normalized concentration C* = C/C_sat, so the
+        consumption rate k must be normalized: k = R / C_sat where R is in uM/s.
 
         For zero-order kinetics (constant rate):
             rate is in mols/L/hour -> R (uM/s) = rate * 1e6 / 3600
-            k = R / C_air
+            k = R / C_sat
 
         For first-order kinetics:
             k is already in 1/s units (or similar)
         """
         p = self.params
-        if hasattr(rate_profile, 'k'):
+        if rate_profile.first_order:
             # First-order rate constant, use directly
             k = rate_profile.k
             logger.debug(f"First-order rate profile: k={k} (1/s)")
             return k
-        elif hasattr(rate_profile, 'rate'):
+        else:
             # Zero-order: convert mols/L/hour to normalized rate
             # rate (mols/L/hour) -> R (uM/s) = rate * 1e6 / 3600
             R_uM_per_s = rate_profile.rate * 1e6 / 3600
-            # Normalize by C_air to get dimensionless k
+            # Normalize by C_sat to get dimensionless k
             k = R_uM_per_s / p.Cs if p.Cs > 0 else 0
             logger.debug(f"Zero-order rate profile: rate={rate_profile.rate} mols/L/hr -> "
                         f"R={R_uM_per_s:.4f} uM/s -> k={k:.6f} (normalized)")
             return k
-        else:
-            logger.error(f"Unsupported rate profile type: {type(rate_profile)}")
-            raise ValueError(f"Unsupported rate profile type: {type(rate_profile)}")
 
     def run_fipy_result(self, rate_profile=ConstantRateUniformHeightProfile(), record_every=1):
         """
@@ -202,7 +203,7 @@ class ReactionDiffusion1DModel:
         logger.info(f"Starting FiPy simulation (result mode): profile={rate_profile}")
 
         p = self.params
-        k = self._rate_to_fipy_k(rate_profile)
+        k = self.normalize_rate(rate_profile)
 
         config = SimulationConfig(
             D=p.D,
@@ -212,7 +213,8 @@ class ReactionDiffusion1DModel:
             k=k,
             dt=p.dt,
             steps=p.Nt,
-            C_initial_fraction=p.C0 / p.Cs if p.Cs > 0 else 1.0
+            C_initial_fraction=p.C0 / p.Cs if p.Cs > 0 else 1.0,
+            first_order_reaction = rate_profile.is_first_order
         )
 
         total_time_hrs = (p.Nt * p.dt) / 3600
@@ -317,7 +319,7 @@ def calc_parameterized_profiles(rate_profiles, volumes=[100],  downsample_factor
 
             df['profile'] = str(rate_profile)
             df['media_height'] = media_height
-            df['media_vol'] = media_height
+            df['media_vol'] = media_vol
 
             df['z'] = df.z_idx * dz
 
@@ -342,11 +344,14 @@ if __name__ == '__main__':
     #ALGAL_REACTION_RATES = list(range(1,45, 8))
     ALGAL_REACTION_RATES = [5e-3, 1e-2, 2e-2, 3e-1]
 
-    ENZYMATIC_REACTION_RATES = [1e-5*v for v in range(5, 50, 10)]#, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3]
+    ENZYMATIC_REACTION_RATES = [1e-5*v for v in range(1, 200, 10)]#, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3]
+
+    #mid range - peak rate reaches zero around 15 minutes, low rate stablizes at non-zero
+    MID_RANGE_REACTION_RATES = [1e-4*v for v in range(2, 100, 2)]
 
 
     if False:
-        RAPID_REACTION_RATES = [1e-3*v for v in range(1, 100, 10)]
+        RAPID_REACTION_RATES = [1e-3*v for v in range(1, 500, 100)]
         pts = []
         for media_vol in [100, 200, 300]:
             for rate in [5, 25, 50, 100, 200, 400]:
@@ -374,15 +379,17 @@ if __name__ == '__main__':
 
     import pandas as pd
     import seaborn as sns
+    import numpy as np
 
-    df_all = calc_parameterized_constant_rate(ENZYMATIC_REACTION_RATES,
-                                 volumes=[100], downsample_factor=60)
+    VOLS = [300]
+    df_all = calc_parameterized_constant_rate(MID_RANGE_REACTION_RATES,
+                                 volumes=[300], downsample_factor=10)
     df_all['t_mins'] = df_all['t_s'] / 60
-
 
     probe_height = 1
     #find closest z in simulation to probe height
-    probe_z = min(abs(probe_height - z) for z in df_all.z.unique())
+    zs = df_all.z.unique()
+    probe_z = zs[np.abs(zs - probe_height).argmin()]
     df_at_bottom = df_all[df_all.z == 0]
     df_at_pos = df_all[df_all.z == probe_z]
     ax = sns.relplot(x='t_mins', y='C', hue='profile',  data=df_at_bottom, kind='line',  row='media_vol')

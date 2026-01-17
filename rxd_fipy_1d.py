@@ -13,7 +13,7 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 
-from fipy import Grid1D, CellVariable, TransientTerm, DiffusionTerm
+from fipy import Grid1D, CellVariable, TransientTerm, DiffusionTerm, ImplicitSourceTerm
 
 
 @dataclass
@@ -37,6 +37,8 @@ class SimulationConfig:
 
     # Initial condition
     C_initial_fraction: float = 1.0  # Initial concentration as fraction of C_air
+
+    first_order_reaction: bool = False #whether reaction is zero or first order
 
     def __post_init__(self):
         """Compute derived parameters."""
@@ -121,12 +123,22 @@ def run_simulation(config: SimulationConfig,
 
     # Boundary conditions:
     # "right" = air-liquid interface (top surface)
-    # "left" = bottom of well (sealed, no flux)
     C.constrain(1.0, mesh.facesRight)  # Fixed concentration at air interface
+
+    # "left" = bottom of well (sealed, no flux)
+    #FIXME - support for monolayer with flux of the monolayer's per-area OCR at bottom layer here instead of
+    # no flux across bottom
     C.faceGrad.constrain((0,), where=mesh.facesLeft)  # Zero flux at bottom
 
-    # Define PDE: dC/dt = D * d²C/dz² - k
-    eq = TransientTerm() == DiffusionTerm(coeff=config.D) - config.k
+    #FIXME - make implicit and explicit equations and then average for crank nicholson
+    if config.first_order_reaction:
+        eq = ( TransientTerm() == DiffusionTerm(coeff=config.D) - ImplicitSourceTerm(coeff=config.k) )
+        #if config.crank nicholson:
+        #    eqX = ( TransientTerm() == ExplicitDiffusionTerm(coeff=config.D) - SourceTerm(coeff=config.k) )
+        #FIXME
+
+    else:
+        eq = ( TransientTerm() == DiffusionTerm(coeff=config.D) - config.k )
 
     if verbose:
         print(f"Running simulation with k={config.k}, Da={config.damkohler:.3f}")
