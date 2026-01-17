@@ -1,34 +1,16 @@
 """
 discrete column simulation
 
-references:
-http://hplgit.github.io/num-methods-for-PDEs/doc/pub/diffu/
-
 TODO - uncertainty eval based on height positional error, volume, concentration, D, and temperature
-TODO - first order reaction rate model
 """
-import numpy as np
-# Numerical solution using finite difference method
 
-def fmols_per_mm2_per_s_to_mols_per_liter_per_hr(rate_fmols_per_mm2_per_s):
-    # a liter is 1e6 cubic mm and an hour is 3600 seconds
-    # a fmols is 1e-15 mols
-    # since we are using a 1D cyclindrical model, 1 m^3 = 1 m^2 (cross
-    # sectional area) and 1 m^2 = 1e6 mm^2
+try:
+    from kinetics import media_vol_to_height
+except:
+    from culturemods.kinetics import media_vol_to_height
 
-    return 1e-15*rate_fmols_per_mm2_per_s * 3600 * 1e6
+from rxd_fipy_1d import SimulationConfig, run_simulation, combine_results
 
-def mols_per_liter_per_hr_to_fmols_per_mm2(rate_mols_per_L_per_hour):
-    #convert reaction rate in mols/L/hour to fmols/mm2/s
-    # NOTE: a liter is 1e6 mm3 in 3D and 1e6 mm2 in 2D (cross sectional
-    # area units for 1D cylindrical model).
-    # 1 mol is 1e15 fmols
-    rate_fmols_per_mm2_per_sec  = 1e15 * rate_mols_per_L_per_hour / 1e6 / 3600
-    return rate_fmols_per_mm2_per_sec
-
-def fmols_per_mm3_to_micromolar(fmols_per_mm3):
-    # 1 fmols per mm^3 equals 1 nanomolar
-    return 1e3*fmols_per_mm3
 
 class ReactionDiffusion1DParams:
     Nz = 100 # Number of spatial steps
@@ -87,9 +69,6 @@ class ReactionDiffusion1DParams:
         dC_dT = rate_umolar_per_s * self.dt * self.dz_volume_uL()
         return dC_dT #umolar per step
 
-def params_from_well_model(csat=200, c_0=200, media_volume_uL=100, D=3.2e-3):
-    pass
-
 class ConstantRateUniformHeightProfile:
     def __init__(self, reaction_consumption_rate=1):
         #reaction rate in mols/L/hour
@@ -107,7 +86,7 @@ class FirstOrderRateProfile:
     def __init__(self, k=1):
         self.k = k
 
-    def reaction_at_height_time(self, z, t, c):
+    def reaction_at_time(self, t, c):
         return c*self.k
 
     def __repr__(self):
@@ -118,7 +97,7 @@ class MichaelisMentenRateProfile:
         self.v_max = v_max
         self.K_m = K_m
 
-    def reaction_at_height_time(self, z, t, c):
+    def reaction_at_time(self, t, c):
         return (self.v_max * c) / (self.K_m + c)
 
     def __repr__(self):
@@ -151,7 +130,7 @@ class ReactionDiffusion1DModel:
             return rate_profile.k
         elif hasattr(rate_profile, 'rate'):
             # Zero-order: convert mols/L/hour to normalized rate
-            # rate (mols/L/hour) -> R (µM/s) = rate * 1e6 / 3600
+            # rate (mols/L/hour) -> R (uM/s) = rate * 1e6 / 3600
             R_uM_per_s = rate_profile.rate * 1e6 / 3600
             # Normalize by C_air to get dimensionless k
             k = R_uM_per_s / p.Cs if p.Cs > 0 else 0
@@ -159,7 +138,7 @@ class ReactionDiffusion1DModel:
         else:
             raise ValueError(f"Unsupported rate profile type: {type(rate_profile)}")
 
-    def run_fipy(self, rate_profile=ConstantRateUniformHeightProfile(), record_every=1):
+    def run_fipy(self, rate_profile=ConstantRateUniformHeightProfile(), record_every=10):
         """
         Run simulation using FiPy solver.
 
@@ -176,7 +155,6 @@ class ReactionDiffusion1DModel:
         np.ndarray
             Concentration profile at each recorded time step (bottom to top)
         """
-        from rxd_fipy_1d import SimulationConfig, run_simulation
 
         p = self.params
         k = self._rate_to_fipy_k(rate_profile)
@@ -241,9 +219,8 @@ class ReactionDiffusion1DModel:
 
         return run_simulation(config, record_every=1, verbose=False)
 
-    def run(self, rate_profile=ConstantRateUniformHeightProfile(), solver='fdm', **kwargs):
+    def run(self, rate_profile=ConstantRateUniformHeightProfile(), **kwargs):
         """
-        Run simulation using specified solver.
 
         Parameters
         ----------
@@ -259,62 +236,9 @@ class ReactionDiffusion1DModel:
         np.ndarray
             Concentration profile at each time step
         """
-        if solver == 'fipy':
-            yield from self.run_fipy(rate_profile, **kwargs)
-        else:
-            yield from self.run_fdm(rate_profile)
-
-    def run_fdm(self, rate_profile=ConstantRateUniformHeightProfile()):
-        p = self.params
-        D = p.D
-        dz = p.L / (p.Nz - 1)  # Spatial step size
-        dt = p.dt #discrete timestep size in seconds
-        #L = p.L
-        C0 = p.C0
-        Cs = p.Cs
-        Nz = p.Nz
-        Nt = p.Nt
+        return self.run_fipy_result(rate_profile, **kwargs)
 
 
-        # Create grids
-        #z = np.linspace(0, L, Nz)
-        t = np.linspace(0, Nt * dt, Nt)
-        C = np.ones(Nz) * C0
-
-        def get_R_dC(rate):
-            reaction_rate_umolars_per_sec = mols_per_liter_per_hr_to_fmols_per_mm2(rate)
-            return reaction_rate_umolars_per_sec * dz**2
-
-        for n in range(Nt):
-            C_new = C.copy()
-            for i in range(1, Nz - 1):  # Exclude boundaries
-                d2C_dz2 = (C[i + 1] - 2 * C[i] + C[i - 1]) / dz**2
-
-                #get reaction rate in mols/L/hour from profile
-                reaction_rate = rate_profile.reaction_at_time(t[n], C[i])
-
-                R_dC = get_R_dC(reaction_rate)
-
-                #change in concentration due to diffusive flux
-                J_dC = dt*D*d2C_dz2
-
-                C_new[i] = max(0, C[i] + J_dC - R_dC)
-
-            # Apply boundary conditions
-            C_new[0] = Cs  # Fixed concentration at the top
-
-            # at the bottom, there is now flux across the boundary
-
-            C_new[-1] = C_new[-2]
-
-            C = C_new  # Update concentration
-            yield C.copy()
-            #C_results.append(C.copy())
-
-try:
-    from kinetics import media_vol_to_height
-except:
-    from culturemods.kinetics import media_vol_to_height
 
 def calc_parameterized_constant_rate(rates, volumes=[100], heights=[1], downsample_factor=100, Nt=60000, solver='fdm'):
     profiles = [ConstantRateUniformHeightProfile(rate) for rate in rates]
@@ -350,7 +274,7 @@ def calc_parameterized_profiles(rate_profiles, volumes=[100], heights=[1], downs
     list of dict
         Data points with rate, time, concentration, etc.
     """
-    pts = []
+    sim_results = []
     for media_vol in volumes:
         for rate_profile in rate_profiles:
             params = ReactionDiffusion1DParams()
@@ -361,29 +285,10 @@ def calc_parameterized_profiles(rate_profiles, volumes=[100], heights=[1], downs
             dz = params.L / (params.Nz - 1)
             profile_str = str(rate_profile)
 
-            # Select solver
-            if solver == 'fipy':
-                sim_iter = model.run_fipy(rate_profile, record_every=downsample_factor)
-                step_multiplier = downsample_factor
-            else:
-                sim_iter = model.run_fdm(rate_profile)
-                step_multiplier = 1
+            sim_result  = model.run(rate_profile, record_every=downsample_factor)
+            sim_results.append(sim_result)
 
-            for t_i, concentrations in enumerate(sim_iter):
-                actual_step = t_i * step_multiplier
-                for h in heights:
-                    depth = media_height - h
-                    z_i = int(depth // dz)
-                    t = actual_step * params.dt
-
-                    c_at_z = concentrations[z_i]
-
-                    # For FiPy, we already downsampled; for FDM, check downsample_factor
-                    if solver == 'fipy' or actual_step % downsample_factor == 0:
-                        pt = {'t_seconds': t, 'profile': profile_str,
-                              'c_at_z': c_at_z, 'depth': depth, 'height': h, 'media_vol': media_vol}
-                        pts.append(pt)
-    return pts
+    return combine_results(sim_results)
 
 
 if __name__ == '__main__':
@@ -419,7 +324,7 @@ if __name__ == '__main__':
                         #height from bottom
                         h = media_height - d
 
-                        rate = rate_profile.reaction_at_height_time
+                        rate = rate_profile.reaction_at_time(t)
                         if t_i % 100 == 0:
                             pt = {'rate': rate, 't_seconds': t,
                                   'c_at_z': concentrations[z_i], 'depth': d, 'height': h, 'media_vol': media_vol}
@@ -428,9 +333,8 @@ if __name__ == '__main__':
     import pandas as pd
     import seaborn as sns
 
-    pts = calc_parameterized_constant_rate(ENZYMATIC_REACTION_RATES,
+    df_all = calc_parameterized_constant_rate(ENZYMATIC_REACTION_RATES,
                                  volumes=[100], heights=[1,2], downsample_factor=60*15, Nt=3600*12)
-    df_all = pd.DataFrame(pts)
     df_all['t_mins'] = df_all['t_seconds'] / 60
     df_all['t_hrs'] = df_all['t_seconds'] / 3600
 
