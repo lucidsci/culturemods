@@ -137,7 +137,7 @@ def run_simulation(config: SimulationConfig,
     result = SimulationResult(config=config)
 
     # Time stepping
-    for step in range(config.steps + 1):
+    for step in range(config.steps):
         if step % record_every == 0:
             for z_idx, c in enumerate(C.value):
                 result.points.append({
@@ -146,9 +146,11 @@ def run_simulation(config: SimulationConfig,
                     'c_star': c,
                     'z_idx': z_idx
                 })
+            print(step)
 
-        if step < config.steps:
-            eq.solve(var=C, dt=config.dt)
+        eq.solve(var=C, dt=config.dt)
+
+
 
     result.final_profile = C.value.copy()
     return result

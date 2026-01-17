@@ -4,6 +4,8 @@ discrete column simulation
 TODO - uncertainty eval based on height positional error, volume, concentration, D, and temperature
 """
 
+import logging
+
 try:
     from kinetics import media_vol_to_height
 except:
@@ -11,11 +13,36 @@ except:
 
 from rxd_fipy_1d import SimulationConfig, run_simulation, combine_results
 
+# Module-level logger
+logger = logging.getLogger(__name__)
+
+
+def configure_logging(level=logging.INFO, format_string=None):
+    """
+    Configure logging for rxdiffusion module.
+
+    Parameters
+    ----------
+    level : int
+        Logging level (e.g., logging.DEBUG, logging.INFO)
+    format_string : str, optional
+        Custom format string for log messages
+    """
+    if format_string is None:
+        format_string = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(format_string))
+
+    logger.setLevel(level)
+    if not logger.handlers:
+        logger.addHandler(handler)
+
 
 class ReactionDiffusion1DParams:
     Nz = 100 # Number of spatial steps
     Nt = 50000  # Number of time steps
-    dt = .15  # time step (seconds per step)
+    dt = 2  # time step (seconds per step)
     L = 3.1 #media height mm
     D = 3e-3 #2e-3 #diffion coefficient mm2/s for 20-25C;  for 37C use ~3e-3
     C0=200
@@ -25,9 +52,14 @@ class ReactionDiffusion1DParams:
         # Stability condition (for explicit method)
         dz = self.calc_dz()
         D_max = (dz**2) / (2 * self.D)
+        logger.debug(f"Validating params: Nz={self.Nz}, Nt={self.Nt}, dt={self.dt:.4f}s, "
+                     f"L={self.L:.2f}mm, D={self.D:.2e}mm2/s, dz={dz:.4f}mm")
+        logger.debug(f"Stability check: dt={self.dt:.4f}s, D_max={D_max:.4f}s")
         if self.dt > D_max:
+            logger.error(f"dt={self.dt} exceeds stability limit D_max={D_max}")
             raise Exception(f'dt too big - D max is {D_max}')
             self.dt = 0.5 * D_max  # Adjust time step for stability
+        logger.debug("Parameter validation passed")
 
     def depth_to_z_index(self, depth_mm):
         dz = self.calc_dz()
@@ -107,18 +139,25 @@ class MichaelisMentenRateProfile:
 # profile of consumption/production uniformly throughout all heights
 class ReactionDiffusion1DModel:
     def __init__(self, params: ReactionDiffusion1DParams):
+        logger.info(f"Initializing ReactionDiffusion1DModel: L={params.L:.2f}mm, "
+                    f"Nz={params.Nz}, Nt={params.Nt}, dt={params.dt:.4f}s")
+        logger.debug(f"Physical params: D={params.D:.2e}mm2/s, C0={params.C0}uM, Cs={params.Cs}uM")
         self.params = params
-        self.params.validate()
+
+        #FIXME - let fipy model handle this as it controls whether
+        # we use implicit, explicit, or crank-nicholson so
+        # we don't know enough to determine if time step is too large
+        #self.params.validate()
 
     def _rate_to_fipy_k(self, rate_profile):
         """
         Convert rate profile to FiPy k parameter.
 
         The FiPy model uses normalized concentration C* = C/C_air, so the
-        consumption rate k must be normalized: k = R / C_air where R is in µM/s.
+        consumption rate k must be normalized: k = R / C_air where R is in uM/s.
 
         For zero-order kinetics (constant rate):
-            rate is in mols/L/hour -> R (µM/s) = rate * 1e6 / 3600
+            rate is in mols/L/hour -> R (uM/s) = rate * 1e6 / 3600
             k = R / C_air
 
         For first-order kinetics:
@@ -127,67 +166,23 @@ class ReactionDiffusion1DModel:
         p = self.params
         if hasattr(rate_profile, 'k'):
             # First-order rate constant, use directly
-            return rate_profile.k
+            k = rate_profile.k
+            logger.debug(f"First-order rate profile: k={k} (1/s)")
+            return k
         elif hasattr(rate_profile, 'rate'):
             # Zero-order: convert mols/L/hour to normalized rate
             # rate (mols/L/hour) -> R (uM/s) = rate * 1e6 / 3600
             R_uM_per_s = rate_profile.rate * 1e6 / 3600
             # Normalize by C_air to get dimensionless k
             k = R_uM_per_s / p.Cs if p.Cs > 0 else 0
+            logger.debug(f"Zero-order rate profile: rate={rate_profile.rate} mols/L/hr -> "
+                        f"R={R_uM_per_s:.4f} uM/s -> k={k:.6f} (normalized)")
             return k
         else:
+            logger.error(f"Unsupported rate profile type: {type(rate_profile)}")
             raise ValueError(f"Unsupported rate profile type: {type(rate_profile)}")
 
-    def run_fipy(self, rate_profile=ConstantRateUniformHeightProfile(), record_every=10):
-        """
-        Run simulation using FiPy solver.
-
-        Parameters
-        ----------
-        rate_profile : rate profile object
-            Must have a `rate` or `k` attribute for the consumption rate.
-            Currently supports ConstantRateUniformHeightProfile and FirstOrderRateProfile.
-        record_every : int
-            Yield concentration profile every N steps
-
-        Yields
-        ------
-        np.ndarray
-            Concentration profile at each recorded time step (bottom to top)
-        """
-
-        p = self.params
-        k = self._rate_to_fipy_k(rate_profile)
-
-        # Create FiPy simulation config from params
-        config = SimulationConfig(
-            D=p.D,
-            C_air=p.Cs,
-            L=p.L,
-            nz=p.Nz,
-            k=k,
-            dt=p.dt,
-            steps=p.Nt,
-            C_initial_fraction=p.C0 / p.Cs if p.Cs > 0 else 1.0
-        )
-
-        # Run FiPy simulation
-        result = run_simulation(config, record_every=record_every, verbose=False)
-
-        # Convert results to match run_fdm output format
-        # FiPy stores z_idx=0 as bottom (left), z_idx=nz-1 as top (right/air)
-        # run_fdm stores index 0 as top (air), index -1 as bottom
-        # So we need to reverse the profile order
-        df = result.to_dataframe()
-        for step in range(0, p.Nt + 1, record_every):
-            step_data = df[df['step'] == step].sort_values('z_idx')
-            if len(step_data) > 0:
-                # Reverse to match FDM convention (top=0, bottom=-1)
-                # and convert from dimensionless to µM
-                profile = step_data['C'].values[::-1]
-                yield profile
-
-    def run_fipy_result(self, rate_profile=ConstantRateUniformHeightProfile()):
+    def run_fipy_result(self, rate_profile=ConstantRateUniformHeightProfile(), record_every=1):
         """
         Run simulation using FiPy solver and return full SimulationResult.
 
@@ -195,13 +190,16 @@ class ReactionDiffusion1DModel:
         ----------
         rate_profile : rate profile object
             Must have a `rate` or `k` attribute for the consumption rate.
+        record_every : int
+            Record concentration profile every N steps
 
         Returns
         -------
         SimulationResult
             Full result object with config, points, and final profile
         """
-        from rxd_fipy_1d import SimulationConfig, run_simulation
+
+        logger.info(f"Starting FiPy simulation (result mode): profile={rate_profile}")
 
         p = self.params
         k = self._rate_to_fipy_k(rate_profile)
@@ -217,90 +215,134 @@ class ReactionDiffusion1DModel:
             C_initial_fraction=p.C0 / p.Cs if p.Cs > 0 else 1.0
         )
 
-        return run_simulation(config, record_every=1, verbose=False)
+        total_time_hrs = (p.Nt * p.dt) / 3600
+        logger.info(f"FiPy config: k={k:.6f}, steps={p.Nt}, total_time={total_time_hrs:.2f}hrs, "
+                   f"record_every={record_every}")
+
+        result = run_simulation(config, record_every=record_every, verbose=False)
+
+        # Log final state
+        if result.final_profile is not None:
+            c_top = result.final_profile[-1] * p.Cs  # Last index is top (air interface)
+            c_bottom = result.final_profile[0] * p.Cs  # First index is bottom
+            logger.info(f"Simulation complete: final C_top={c_top:.2f}uM, C_bottom={c_bottom:.2f}uM")
+
+        return result
 
     def run(self, rate_profile=ConstantRateUniformHeightProfile(), **kwargs):
         """
+        Run simulation and return SimulationResult.
 
         Parameters
         ----------
         rate_profile : rate profile object
             Consumption rate profile
-        solver : str
-            'fdm' for finite difference method, 'fipy' for FiPy solver
         **kwargs
-            Additional arguments passed to the solver method
+            Additional arguments passed to run_fipy_result (e.g., record_every)
 
-        Yields
-        ------
-        np.ndarray
-            Concentration profile at each time step
+        Returns
+        -------
+        SimulationResult
+            Full result object with config, points, and final profile
         """
+        logger.debug(f"run() called with profile={rate_profile}, kwargs={kwargs}")
         return self.run_fipy_result(rate_profile, **kwargs)
 
 
 
-def calc_parameterized_constant_rate(rates, volumes=[100], heights=[1], downsample_factor=100, Nt=60000, solver='fdm'):
+def calc_parameterized_constant_rate(rates, volumes=[100], downsample_factor=100, T_minutes=60):
+    """Run simulations with constant (zero-order) consumption rates."""
+    logger.info(f"calc_parameterized_constant_rate: rates={rates}")
     profiles = [ConstantRateUniformHeightProfile(rate) for rate in rates]
-    return calc_parameterized_profiles(profiles, volumes, heights, downsample_factor, Nt, solver=solver)
+    return calc_parameterized_profiles(profiles, volumes, downsample_factor, T_minutes)
 
 
-def calc_parameterized_first_order(ks, volumes=[100], heights=[1], downsample_factor=100, Nt=60000, solver='fdm'):
+def calc_parameterized_first_order(ks, volumes=[100], downsample_factor=100, T_minutes=60):
+    """Run simulations with first-order consumption kinetics."""
+    logger.info(f"calc_parameterized_first_order: k values={ks}")
     profiles = [FirstOrderRateProfile(k) for k in ks]
-    return calc_parameterized_profiles(profiles, volumes, heights, downsample_factor, Nt, solver=solver)
+    return calc_parameterized_profiles(profiles, volumes, downsample_factor, T_minutes)
 
 
-def calc_parameterized_profiles(rate_profiles, volumes=[100], heights=[1], downsample_factor=100, Nt=60000, solver='fdm'):
+def calc_parameterized_profiles(rate_profiles, volumes=[100],  downsample_factor=100, duration_minutes=60):
     """
-    Run simulations across rate profiles, volumes, and heights.
+    Run simulations across rate profiles, volumes
 
     Parameters
     ----------
     rate_profiles : list
         List of rate profile objects
     volumes : list
-        Media volumes in µL
-    heights : list
-        Heights from bottom to probe (mm)
+        Media volumes in uL
     downsample_factor : int
         Record every N steps
-    Nt : int
-        Number of time steps
-    solver : str
-        'fdm' for finite difference method, 'fipy' for FiPy solver
 
     Returns
     -------
     list of dict
         Data points with rate, time, concentration, etc.
     """
-    sim_results = []
+    dt = 1 #seconds
+    Nt = int(duration_minutes * 60 / dt)
+
+    total_sims = len(volumes) * len(rate_profiles)
+    logger.info(f"Starting parameterized simulation sweep: {len(rate_profiles)} profiles x "
+               f"{len(volumes)} volumes = {total_sims} simulations")
+    logger.info(f"Parameters: volumes={volumes}uL, Nt={Nt}, downsample_factor={downsample_factor}")
+    logger.debug(f"Rate profiles: {rate_profiles}")
+
+    dfs = []
+    sim_count = 0
+
     for media_vol in volumes:
+        media_height = media_vol_to_height(media_vol)
         for rate_profile in rate_profiles:
+            sim_count += 1
+            logger.info(f"Running simulation {sim_count}/{total_sims}: "
+                       f"volume={media_vol}uL, profile={rate_profile}")
+
             params = ReactionDiffusion1DParams()
             params.L = media_vol_to_height(media_vol)
             params.Nt = Nt
+            dz = params.calc_dz()
+
+            logger.debug(f"Media height for {media_vol}uL: {params.L:.2f}mm")
+
             model = ReactionDiffusion1DModel(params)
-            media_height = media_vol_to_height(media_vol)
-            dz = params.L / (params.Nz - 1)
-            profile_str = str(rate_profile)
 
-            sim_result  = model.run(rate_profile, record_every=downsample_factor)
-            sim_results.append(sim_result)
+            sim_result = model.run(rate_profile, record_every=downsample_factor)
+            df = sim_result.to_dataframe()
 
-    return combine_results(sim_results)
+
+
+            df['profile'] = str(rate_profile)
+            df['media_height'] = media_height
+            df['media_vol'] = media_height
+
+            df['z'] = df.z_idx * dz
+
+            dfs.append(df)
+
+            logger.debug(f"Simulation {sim_count} complete: {len(sim_result.points)} points")
+
+    return pd.concat(dfs)
 
 
 if __name__ == '__main__':
+    # Configure logging for demo
+    configure_logging(level=logging.INFO)
+
     # Plot results
     import matplotlib.pyplot as plt
     from kinetics import media_vol_to_height
+
+    logger.info("Starting rxdiffusion demo")
 
     #example reaction rates in mols/L/hr
     #ALGAL_REACTION_RATES = list(range(1,45, 8))
     ALGAL_REACTION_RATES = [5e-3, 1e-2, 2e-2, 3e-1]
 
-    ENZYMATIC_REACTION_RATES = [1e-5*v for v in range(5, 30, 5)]#, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3]
+    ENZYMATIC_REACTION_RATES = [1e-5*v for v in range(5, 50, 10)]#, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3]
 
 
     if False:
@@ -334,11 +376,16 @@ if __name__ == '__main__':
     import seaborn as sns
 
     df_all = calc_parameterized_constant_rate(ENZYMATIC_REACTION_RATES,
-                                 volumes=[100], heights=[1,2], downsample_factor=60*15, Nt=3600*12)
-    df_all['t_mins'] = df_all['t_seconds'] / 60
-    df_all['t_hrs'] = df_all['t_seconds'] / 3600
+                                 volumes=[100], downsample_factor=60)
+    df_all['t_mins'] = df_all['t_s'] / 60
 
-    ax = sns.relplot(x='t_mins', y='c_at_z', hue='profile', col='height', data=df_all, kind='line',  row='media_vol')
+
+    probe_height = 1
+    #find closest z in simulation to probe height
+    probe_z = min(abs(probe_height - z) for z in df_all.z.unique())
+    df_at_bottom = df_all[df_all.z == 0]
+    df_at_pos = df_all[df_all.z == probe_z]
+    ax = sns.relplot(x='t_mins', y='C', hue='profile',  data=df_at_bottom, kind='line',  row='media_vol')
     plt.ylim(0, 210)
     plt.show()
 
@@ -354,7 +401,7 @@ if __name__ == '__main__':
         plt.show()
 
         def _plot_by_rates(rates, volume=300, height=1, downsample_factor=100, Nt=60000):
-            pts = calc_parameterized_constant_rate(rates, volumes=[volume], heights=[height], Nt=Nt)
+            pts = calc_parameterized_constant_rate(rates, volumes=[volume])
             df_all = pd.DataFrame(pts)
             df_all['t_mins'] = df_all['t_seconds'] / 60
 
