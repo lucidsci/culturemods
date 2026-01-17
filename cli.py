@@ -60,6 +60,27 @@ def o2_at_bottom_by_vol(vols, ocr=100, csat=185):
     plt.show()
 
 @cmds.command()
+@click.option('--ocr', default=100, type=int)
+@click.option('--csat', default=185, type=int)
+def o2_at_heights(ocr=100, csat=185):
+
+    heights_um = list(range(1000, 1500, 100))
+    vol = 100
+    q = kinetics.flux_units_convert(ocr)
+    for h in heights_um:
+        height = media_vol_to_height(vol)
+        ts = list(range(0, 3600*4, 1))
+        cs = [kinetics.concentration(h/1000, t, q, c_initial=csat, media_height=height) for t in ts]
+        plt.plot([t/3600 for t in ts], cs, label="position above bottom ={}um".format(h))
+        plt.xlabel("Time (hours)")
+        plt.ylabel("O2 (micromolar)")
+        plt.ylim(0, csat)
+    
+    plt.legend()
+    plt.title("O2 at position (OCR={})".format(ocr))
+    plt.show()
+
+@cmds.command()
 @click.argument('vols', nargs=-1, type=int)
 @click.option('--position', default=1.25)
 @click.option('--ocr', default=100, type=int)
@@ -116,6 +137,43 @@ def plot_o2_at_position_by_ocr(ocrs, position=1.25, vol=100, csat=185):
     
     plt.legend()
     plt.title("O2 at {}mm above cells by OCR in {} uL".format(position, vol))
+
+
+@cmds.command()
+@click.argument('oprs', nargs=-1, type=int)
+@click.option('--position', default=1.25)
+@click.option('--vol', default=100, type=int)
+@click.option('--csat', default=185, type=int)
+def o2_at_position_by_opr(oprs, position=1.25, vol=100, csat=185):
+    height = media_vol_to_height(vol)
+    for opr in oprs:
+        q = kinetics.flux_units_convert(-1*opr)
+        ts = list(range(0, 3600*4, 1))
+        cs = [kinetics.concentration(position, t, q, c_initial=csat, media_height=height) for t in ts]
+        plt.plot([t/3600 for t in ts], cs, label="OPR={}".format(opr))
+        plt.xlabel("Time (hours)")
+        plt.ylabel("O2 (micromolar)")
+        plt.ylim(0, None)
+    
+    plt.legend()
+    plt.title("O2 at {}mm above cells by OCR in {} uL".format(position, vol))
+    plt.show()
+
+def plot_o2_at_position_by_ocr(ocrs, position=1.25, vol=100, csat=185):
+    height = media_vol_to_height(vol)
+    for ocr in ocrs:
+        q = kinetics.flux_units_convert(ocr)
+        ts = list(range(0, 3600*4, 1))
+        cs = [kinetics.concentration(position, t, q, c_initial=csat, media_height=height) for t in ts]
+        plt.plot([t/3600 for t in ts], cs, label="OCR={}".format(ocr))
+        plt.xlabel("Time (hours)")
+        plt.ylabel("O2 (micromolar)")
+        plt.ylim(0, None)
+    
+    plt.legend()
+    plt.title("O2 at {}mm above cells by OCR in {} uL".format(position, vol))
+    plt.show()
+
     plt.show()
 
 def plot_gradient_evolution(ocr=100, vol=100, csat=185, tmax_hrs=1, delta_t_mins=15):
