@@ -6,8 +6,8 @@ from mpl_toolkits.mplot3d import Axes3D
 from fipy import CylindricalGrid1D, CellVariable, TransientTerm, DiffusionTerm, ImplicitSourceTerm
 
 # Physical parameters (converted to mm units)
-D = 3e-3  # Oxygen diffusion coefficient in water (fmols/mm^2/s)
-ocr = 1  # Oxygen consumption rate (fmols/mm2/s)
+D = 3e-3  # Oxygen diffusion coefficient in water (mm^2/s)
+k = 1e-4  # Oxygen consumption rate (1/s)
 C_air = 200.0  # Oxygen concentration at air interface (µM, ~8.5 mg/L)
 
 # Geometry
@@ -16,21 +16,14 @@ nr = 100  # Number of mesh points
 dx = L / nr
 # Create 1D cylindrical mesh (radial direction)
 # For simplicity, we'll model the axial (depth) direction
-# since this 1D grid uses only "left" and "right" boundaries
 mesh = CylindricalGrid1D(dx=dx, nx=nr)
 
-C_initial = C_air #well is initially saturated with O2
+
 # Create the concentration variable
-C = CellVariable(name="oxygen concentration", mesh=mesh, value=C_initial)
+C = CellVariable(name="oxygen concentration", mesh=mesh, value=200)
 
 # Boundary conditions
-#NOTE that CylindricalGrid1D has only "left" and "right" faces for boundary conditions
-# we will use "right" (will last index in C values) as our air-liquid interface
-# (top surface of media in the well)
-#  we will use "left" (first index in C  values array) as the bottom of the
-#  well - where we assume no diffusion can occur
-
-# Top surface right: Contact with air - fixed concentration
+# Top surface right (z=0): Contact with air - fixed concentration
 C.constrain(C_air, mesh.facesRight)  # Air interface
 
 # Bottom surface "left" (z=L): Sealed - zero flux (natural BC)
@@ -45,8 +38,6 @@ total_time = dt * steps
 # TransientTerm for dC/dt
 # DiffusionTerm for D * d²C/dz²
 # ImplicitSourceTerm for -k*C (consumption)
-k = D*ocr
-
 eq = (TransientTerm() == DiffusionTerm(coeff=D) - ImplicitSourceTerm(coeff=k))
 
 # Storage for plotting
