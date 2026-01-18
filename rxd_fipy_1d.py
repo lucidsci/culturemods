@@ -162,6 +162,9 @@ def run_simulation(config: SimulationConfig,
 
         eq.solve(var=C, dt=config.dt)
 
+        #halt simulation when C at bottom would go below zero
+        if C.value[0] <= 0:
+            break
 
 
     result.final_profile = C.value.copy()

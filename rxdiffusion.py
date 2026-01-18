@@ -205,6 +205,7 @@ class ReactionDiffusion1DModel:
         p = self.params
         k = self.normalize_rate(rate_profile)
 
+
         config = SimulationConfig(
             D=p.D,
             C_air=p.Cs,
@@ -214,7 +215,7 @@ class ReactionDiffusion1DModel:
             dt=p.dt,
             steps=p.Nt,
             C_initial_fraction=p.C0 / p.Cs if p.Cs > 0 else 1.0,
-            first_order_reaction = rate_profile.is_first_order
+            first_order_reaction = rate_profile.first_order
         )
 
         total_time_hrs = (p.Nt * p.dt) / 3600
@@ -306,7 +307,14 @@ def calc_parameterized_profiles(rate_profiles, volumes=[100],  downsample_factor
             params = ReactionDiffusion1DParams()
             params.L = media_vol_to_height(media_vol)
             params.Nt = Nt
+
+            #target a strandard dz of around every 10 microns
+            L_um = round(params.L * 1000)
+            params.Nz  = L_um/10 - 1
+
             dz = params.calc_dz()
+
+            logger.info(f"dz {dz*1000} microns")
 
             logger.debug(f"Media height for {media_vol}uL: {params.L:.2f}mm")
 
@@ -347,7 +355,7 @@ if __name__ == '__main__':
     ENZYMATIC_REACTION_RATES = [1e-5*v for v in range(1, 200, 10)]#, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3]
 
     #mid range - peak rate reaches zero around 15 minutes, low rate stablizes at non-zero
-    MID_RANGE_REACTION_RATES = [1e-4*v for v in range(2, 100, 2)]
+    MID_RANGE_REACTION_RATES = [1e-4*v for v in range(1, 60, 10)]
 
 
     if False:
@@ -383,8 +391,9 @@ if __name__ == '__main__':
 
     VOLS = [300]
     df_all = calc_parameterized_constant_rate(MID_RANGE_REACTION_RATES,
-                                 volumes=[300], downsample_factor=10)
+                                 volumes=[100, 200, 300], downsample_factor=10)
     df_all['t_mins'] = df_all['t_s'] / 60
+    df_all['z_um'] = df_all.z.apply(lambda z: round(z*1000))
 
     probe_height = 1
     #find closest z in simulation to probe height
