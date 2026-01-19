@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from rxd_fipy_1d import SimulationConfig, SimulationResult, run_simulation
-from conversions import rate_pmols_per_L_per_minute_to_umolar_per_s
+from conversions import rate_pmols_per_L_per_minute_to_umolar_per_s, flux_fmols_per_mm2_per_s_to_umolar_per_s
 
 class SimulationGUI:
     """GUI for oxygen diffusion simulation."""
@@ -27,6 +27,7 @@ class SimulationGUI:
             'nz': 100,
             'rate': 5, #pmols/L/min
             'k1': 0.0,
+            'flux_bottom': 0.0,  # fmol/mm²/s
             'top_constraint': 'open',
             'dt': 1.0,
             'steps': 1800,
@@ -128,6 +129,15 @@ class SimulationGUI:
                 step=0.001,
                 min=0,
                 on_change=lambda e: self._update_config('k1', e.value)
+            ).classes('w-full')
+
+            ui.number(
+                'Bottom flux (fmol/mm²/s)',
+                value=self.config_values['flux_bottom'],
+                format='%.2f',
+                step=0.1,
+                min=0,
+                on_change=lambda e: self._update_config('flux_bottom', e.value)
             ).classes('w-full')
 
             ui.select(
@@ -266,16 +276,26 @@ class SimulationGUI:
     def _create_config(self) -> SimulationConfig:
         """Create SimulationConfig from current values."""
         C_air = self.config_values['C_air']
+        L = self.config_values['L']
+
+        # Convert volumetric reaction rate
         rate_umolar_per_s = rate_pmols_per_L_per_minute_to_umolar_per_s(self.config_values['rate'])
-        k =  rate_umolar_per_s / C_air #normalize out concentration units
+        k = rate_umolar_per_s / C_air  # normalize out concentration units
+
+        dt = self.config_values['dt']
+        # Convert bottom flux (fmol/mm2/s to umols/mm2/s)
+        #FIXME - don't think this is correct
+        flux_bottom = self.config_values['flux_bottom'] / C_air * dt
+
 
         return SimulationConfig(
             D=self.config_values['D'],
             C_air=self.config_values['C_air'],
-            L=self.config_values['L'],
+            L=L,
             nz=self.config_values['nz'],
             k=k,
             k1=self.config_values['k1'],
+            flux_bottom=flux_bottom,
             top_constraint=self.config_values['top_constraint'],
             dt=self.config_values['dt'],
             steps=self.config_values['steps'],

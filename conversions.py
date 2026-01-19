@@ -28,5 +28,18 @@ def rate_mols_per_L_per_hour_umolar_per_s(rate):
 def rate_pmols_per_L_per_minute_to_umolar_per_s(rate):
     return rate * 60 / 1e3
 
+def flux_fmols_per_mm2_per_s_to_umolar_per_s(flux, length_mm=1.0):
+    """Convert flux in fmol/mm²/s to volumetric rate in µM/s.
+
+    For a 1D model, flux (per area) becomes concentration rate (per volume)
+    when divided by a characteristic length.
+
+    1 fmol/mm³ = 0.001 µM (since 1 µM = 1000 fmol/mm³)
+    So fmol/mm²/s ÷ mm = fmol/mm³/s → × 0.001 = µM/s
+    """
+    # fmol/mm²/s ÷ length_mm = fmol/mm³/s
+    # fmol/mm³/s × 0.001 = µM/s
+    return flux / length_mm * 0.001
+
 "1 uM = 1000 fmol mm^−3"
 # 1 L in 1e6 mm^3
