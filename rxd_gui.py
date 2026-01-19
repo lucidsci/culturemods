@@ -3,13 +3,14 @@ NiceGUI application for configuring, running, and visualizing
 1D oxygen diffusion-reaction simulations.
 """
 
-from nicegui import ui
+from nicegui import ui, run
+import asyncio
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from rxd_fipy_1d import SimulationConfig, SimulationResult, run_simulation
-
+from conversions import rate_pmols_per_L_per_minute_to_umolar_per_s
 
 class SimulationGUI:
     """GUI for oxygen diffusion simulation."""
@@ -24,11 +25,11 @@ class SimulationGUI:
             'C_air': 200.0,
             'L': 3.1,
             'nz': 100,
-            'k': 1.0,
+            'rate': 5, #pmols/L/min
             'k1': 0.0,
             'top_constraint': 'open',
             'dt': 1.0,
-            'steps': 1000,
+            'steps': 1800,
             'C_initial_fraction': 1.0,
             'halt_on_C_zero': True,
         }
@@ -43,13 +44,20 @@ class SimulationGUI:
         self.status_label = None
         self.probe_slider = None
         self.step_slider = None
+        self.progress_bar = None
+        self.run_button = None
+
+        # Progress tracking
+        self.current_step = 0
+        self.total_steps = 0
+        self.is_running = False
 
     def build_ui(self):
         """Build the main UI layout."""
         ui.dark_mode().enable()
 
         with ui.header().classes('items-center justify-between'):
-            ui.label('O₂ Diffusion-Reaction Simulator').classes('text-2xl font-bold')
+            ui.label('Culture Well O2 Diffusion-Reaction Simulator').classes('text-2xl font-bold')
 
         with ui.row().classes('w-full gap-4 p-4'):
             # Left panel - Configuration
@@ -106,18 +114,17 @@ class SimulationGUI:
             ui.label('Reaction Parameters').classes('font-semibold text-blue-400')
 
             ui.number(
-                'Zero-order rate k',
-                value=self.config_values['k'],
-                format='%.3f',
-                step=0.1,
-                min=0,
-                on_change=lambda e: self._update_config('k', e.value)
+                'Zero-order reaction rate (pmols/L/minute))',
+                value=self.config_values['rate'],
+                format='%.1f',
+                step=.1,
+                on_change=lambda e: self._update_config('rate', e.value)
             ).classes('w-full')
 
             ui.number(
                 'First-order rate k1',
                 value=self.config_values['k1'],
-                format='%.4f',
+                format='%.6f',
                 step=0.001,
                 min=0,
                 on_change=lambda e: self._update_config('k1', e.value)
@@ -174,7 +181,10 @@ class SimulationGUI:
 
             # Run button and status
             with ui.row().classes('w-full gap-2'):
-                ui.button('Run Simulation', on_click=self._run_simulation).classes('flex-grow')
+                self.run_button = ui.button('Run Simulation', on_click=self._run_simulation).classes('flex-grow')
+
+            self.progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-full')
+            self.progress_bar.visible = False
 
             self.status_label = ui.label('Ready').classes('text-sm text-gray-400')
 
@@ -196,7 +206,7 @@ class SimulationGUI:
                 ).classes('w-48')
                 self.probe_label = ui.label(f'{self.probe_height_mm:.1f} mm').classes('text-sm w-16')
 
-            self.timeseries_plot = ui.plotly({}).classes('w-full h-80')
+            self.timeseries_plot = ui.plotly({}).classes('w-full h-[400px]')
 
         # Profile heatmap card
         with ui.card().classes('w-full'):
@@ -211,7 +221,7 @@ class SimulationGUI:
 
             with ui.row().classes('w-full gap-4'):
                 # 1D heatmap
-                self.profile_plot = ui.plotly({}).classes('flex-grow h-64')
+                self.profile_plot = ui.plotly({}).classes('flex-grow h-[400px]')
 
         # Initialize empty plots
         self._update_timeseries_plot()
@@ -255,12 +265,16 @@ class SimulationGUI:
 
     def _create_config(self) -> SimulationConfig:
         """Create SimulationConfig from current values."""
+        C_air = self.config_values['C_air']
+        rate_umolar_per_s = rate_pmols_per_L_per_minute_to_umolar_per_s(self.config_values['rate'])
+        k =  rate_umolar_per_s / C_air #normalize out concentration units
+
         return SimulationConfig(
             D=self.config_values['D'],
             C_air=self.config_values['C_air'],
             L=self.config_values['L'],
             nz=self.config_values['nz'],
-            k=self.config_values['k'],
+            k=k,
             k1=self.config_values['k1'],
             top_constraint=self.config_values['top_constraint'],
             dt=self.config_values['dt'],
@@ -269,16 +283,45 @@ class SimulationGUI:
             halt_on_C_zero=self.config_values['halt_on_C_zero'],
         )
 
+    def _step_callback(self, step: int):
+        """Callback called on each simulation step to update progress."""
+        self.current_step = step
+
     async def _run_simulation(self):
         """Run the simulation with current configuration."""
+        if self.is_running:
+            return
+
+        self.is_running = True
+        self.run_button.disable()
         self.status_label.text = 'Running simulation...'
         self.status_label.classes('text-yellow-400', remove='text-gray-400 text-green-400 text-red-400')
 
+        # Show and reset progress bar
+        self.progress_bar.visible = True
+        self.progress_bar.value = 0
+        self.current_step = 0
+
         try:
             config = self._create_config()
+            self.total_steps = config.steps
 
-            # Run simulation (would ideally be async but FiPy isn't)
-            self.result = run_simulation(config, record_every=1, verbose=False)
+            # Start progress update timer
+            progress_timer = ui.timer(0.1, self._update_progress)
+
+            # Run simulation in background thread to not block UI
+            self.result = await run.io_bound(
+                run_simulation,
+                config,
+                record_every=1,
+                verbose=False,
+                step_callback=self._step_callback
+            )
+
+            # Stop progress timer and set to 100%
+            progress_timer.cancel()
+            self.progress_bar.value = 1.0
+
             self.df = self.result.to_dataframe()
 
             # Update slider ranges
@@ -302,6 +345,18 @@ class SimulationGUI:
             self.status_label.text = f'Error: {str(e)}'
             self.status_label.classes('text-red-400', remove='text-gray-400 text-yellow-400 text-green-400')
 
+        finally:
+            self.is_running = False
+            self.run_button.enable()
+            # Hide progress bar after a short delay
+            await asyncio.sleep(1.0)
+            self.progress_bar.visible = False
+
+    def _update_progress(self):
+        """Update the progress bar value."""
+        if self.total_steps > 0:
+            self.progress_bar.value = self.current_step / self.total_steps
+
     def _on_probe_height_change(self, e):
         """Handle probe height slider change."""
         self.probe_height_mm = e.value
@@ -321,11 +376,13 @@ class SimulationGUI:
         if self.df is None or len(self.df) == 0:
             # Empty plot
             fig = go.Figure()
+            t_max = self.config_values['steps'] * self.config_values['dt']
             fig.update_layout(
                 template='plotly_dark',
                 margin=dict(l=60, r=20, t=30, b=50),
-                xaxis_title='Time (hours)',
+                xaxis_title='Time (minutes)',
                 yaxis_title='O₂ Concentration (µM)',
+                xaxis=dict(range=[0, t_max]),
                 yaxis=dict(range=[0, 220]),
             )
             fig.add_annotation(
@@ -346,19 +403,20 @@ class SimulationGUI:
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=df_probe['t_hrs'],
+            x=df_probe['t_mins'],
             y=df_probe['C'],
             mode='lines',
             name=f'z = {self.probe_height_mm:.1f} mm',
             line=dict(color='#00d4aa', width=2)
         ))
 
+        c_max = self.df.C.max()
         fig.update_layout(
             template='plotly_dark',
             margin=dict(l=60, r=20, t=30, b=50),
-            xaxis_title='Time (hours)',
+            xaxis_title='Time (minutes)',
             yaxis_title='O₂ Concentration (µM)',
-            yaxis=dict(range=[0, config.C_air * 1.1]),
+            yaxis=dict(range=[0, c_max * 1.1]),
             showlegend=True,
             legend=dict(x=0.02, y=0.98),
         )
@@ -447,9 +505,10 @@ class SimulationGUI:
             showlegend=False,
         )
 
+        c_max = np.max(concentrations)
         # Update axes
         fig.update_xaxes(showticklabels=False, row=1, col=1)
-        fig.update_xaxes(title_text='O₂ Concentration (µM)', range=[0, config.C_air * 1.1], row=1, col=2)
+        fig.update_xaxes(title_text='O₂ Concentration (µM)', range=[0, c_max * 1.1], row=1, col=2)
         fig.update_yaxes(title_text='Height (mm)', row=1, col=1)
 
         # Add annotations for top/bottom

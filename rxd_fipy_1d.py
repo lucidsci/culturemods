@@ -94,6 +94,7 @@ class SimulationResult:
         df['C'] = df['c_star'] * self.config.C_air
         df['height_mm'] = df['z_idx'] * self.config.dz
         df['t_hrs'] = df['step'] * self.config.dt / 3600
+        df['t_mins'] = df['step'] * self.config.dt / 60
         df['t_s'] = df['step'] * self.config.dt
         return df
 
@@ -111,7 +112,8 @@ def create_mesh(config: SimulationConfig) -> Grid1D:
 
 def run_simulation(config: SimulationConfig,
                    record_every: int = 1,
-                   verbose: bool = False) -> SimulationResult:
+                   verbose: bool = False,
+                   step_callback = None) -> SimulationResult:
     """
     Run a 1D oxygen diffusion simulation.
 
@@ -175,9 +177,11 @@ def run_simulation(config: SimulationConfig,
     for step in range(config.steps):
         if step % record_every == 0:
             _record_step(C)
-            print(step)
+            if step_callback is not None:
+                step_callback(step)
 
         eq.solve(var=C, dt=config.dt)
+
 
         if C.value[0] <= 0:
             C.value[0] = 0
