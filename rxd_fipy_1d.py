@@ -100,7 +100,7 @@ class SimulationResult:
     def get_profile_at_step(self, step: int):
         """Get concentration profile at a specific time step."""
         import pandas as pd
-        df = pd.DataFrame(self.points)
+        df = self.to_dataframe()
         return df[df['step'] == step].sort_values('z_idx')
 
 
