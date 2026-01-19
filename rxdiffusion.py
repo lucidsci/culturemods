@@ -89,7 +89,7 @@ class ReactionDiffusion1DParams:
         # rate q in units of mm2/s
         # a liter is 1e6 mm3 in 3D and 1e6 mm2 in 2D (cross sectional
         # area units for 1D cylindrical model).
-        rate_per_mm2_per_sec  = rate_per_L_per_hour * 1e6 * 3600
+        rate_per_mm2_per_sec  = rate_per_L_per_hour * 1e6 / 3600
         T = self.characteristic_time()
         q_star = rate_per_mm2_per_sec * T
         return q_star
