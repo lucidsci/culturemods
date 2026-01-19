@@ -184,15 +184,16 @@ def run_simulation(config: SimulationConfig,
 
 
         if C.value[0] <= 0:
-            C.value[0] = 0
 
             if config.halt_on_C_zero:
                 #halt simulation when C at bottom would go below zero
+                C.value[0] = 0
                 _record_step(C)
                 break
 
         #concentration cannot go below zero anywhere
-        #FIXME - C.value = np.max(C.value, 0)
+        #FIXME - doesn't work
+        #C.setValue(np.max(C.value, 0))
 
     result.final_profile = C.value.copy()
     return result
