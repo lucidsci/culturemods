@@ -29,6 +29,14 @@ COLORS = [
     '#fcbad3',  # pink
 ]
 
+# Line styles available
+LINE_STYLES = {
+    'solid': None,  # plotly default
+    'dash': 'dash',
+    'dot': 'dot',
+    'dashdot': 'dashdot',
+}
+
 
 @dataclass
 class SimulationEntry:
@@ -39,6 +47,7 @@ class SimulationEntry:
     df: Optional[object] = None  # pandas DataFrame
     visible: bool = True
     color: str = '#00d4aa'
+    line_style: str = 'solid'
 
 
 class SimulationGUI:
@@ -55,9 +64,16 @@ class SimulationGUI:
         # Editor config values (for the form)
         self.editor_values = self._default_config()
 
+        # Editor style values
+        self.editor_color = '#00d4aa'
+        self.editor_line_style = 'solid'
+
         # Visualization parameters
         self.probe_height_mm = 1.0
         self.profile_step = 0
+
+        # Theme
+        self.dark_mode = True
 
         # UI element references
         self.timeseries_plot = None
@@ -69,6 +85,7 @@ class SimulationGUI:
         self.sim_list_container = None
         self.editor_container = None
         self.editor_card = None
+        self.dark_mode_toggle = None
 
         # Progress tracking
         self.current_step = 0
@@ -103,10 +120,18 @@ class SimulationGUI:
 
     def build_ui(self):
         """Build the main UI layout."""
-        ui.dark_mode().enable()
+        self.dark = ui.dark_mode()
+        self.dark.enable()
 
         with ui.header().classes('items-center justify-between'):
             ui.label('Culture Well O₂ Diffusion-Reaction Simulator').classes('text-2xl font-bold')
+            with ui.row().classes('items-center gap-2'):
+                ui.icon('light_mode').classes('text-yellow-400')
+                self.dark_mode_toggle = ui.switch(
+                    value=self.dark_mode,
+                    on_change=self._toggle_theme
+                )
+                ui.icon('dark_mode').classes('text-blue-400')
 
         with ui.row().classes('w-full gap-4 p-4'):
             # Left panel - Simulations list and editor
@@ -182,17 +207,37 @@ class SimulationGUI:
         self._update_timeseries_plot()
         self._update_profile_plot()
 
+    def _toggle_theme(self, e):
+        """Toggle between dark and light theme."""
+        self.dark_mode = e.value
+        if self.dark_mode:
+            self.dark.enable()
+        else:
+            self.dark.disable()
+        # Refresh plots with new theme
+        self._update_timeseries_plot()
+        self._update_profile_plot()
+
+    def _get_plot_template(self) -> str:
+        """Get the plotly template based on current theme."""
+        return 'plotly_dark' if self.dark_mode else 'plotly_white'
+
     def _add_new_simulation(self):
         """Start adding a new simulation."""
         self.editing_index = -1
         self.editor_values = self._default_config()
+        self.editor_color = self._get_next_color()
+        self.editor_line_style = 'solid'
         self._show_editor(f'Simulation {self.next_sim_id}')
 
     def _edit_simulation(self, index: int):
         """Edit an existing simulation."""
         self.editing_index = index
-        self.editor_values = self.simulations[index].config_values.copy()
-        self._show_editor(self.simulations[index].name, is_edit=True)
+        sim = self.simulations[index]
+        self.editor_values = sim.config_values.copy()
+        self.editor_color = sim.color
+        self.editor_line_style = sim.line_style
+        self._show_editor(sim.name, is_edit=True)
 
     def _show_editor(self, name: str, is_edit: bool = False):
         """Show the configuration editor."""
@@ -207,6 +252,25 @@ class SimulationGUI:
 
             # Name input
             name_input = ui.input('Name', value=name).classes('w-full')
+
+            ui.separator()
+
+            # Appearance
+            ui.label('Appearance').classes('font-semibold text-blue-400')
+
+            with ui.row().classes('w-full items-center gap-4'):
+                ui.label('Color:').classes('text-sm')
+                color_input = ui.color_input(
+                    value=self.editor_color,
+                    on_change=lambda e: setattr(self, 'editor_color', e.value)
+                ).classes('w-24')
+
+                ui.label('Line style:').classes('text-sm')
+                ui.select(
+                    list(LINE_STYLES.keys()),
+                    value=self.editor_line_style,
+                    on_change=lambda e: setattr(self, 'editor_line_style', e.value)
+                ).classes('w-28')
 
             ui.separator()
 
@@ -345,6 +409,8 @@ class SimulationGUI:
             sim = self.simulations[self.editing_index]
             sim.name = name
             sim.config_values = self.editor_values.copy()
+            sim.color = self.editor_color
+            sim.line_style = self.editor_line_style
             sim.result = None  # Clear results since config changed
             sim.df = None
         else:
@@ -352,7 +418,8 @@ class SimulationGUI:
             sim = SimulationEntry(
                 name=name,
                 config_values=self.editor_values.copy(),
-                color=self._get_next_color()
+                color=self.editor_color,
+                line_style=self.editor_line_style
             )
             self.simulations.append(sim)
             self.next_sim_id += 1
@@ -534,12 +601,13 @@ class SimulationGUI:
     def _update_timeseries_plot(self):
         """Update the timeseries plot with all visible simulations."""
         fig = go.Figure()
+        template = self._get_plot_template()
 
         visible_sims = [s for s in self.simulations if s.visible and s.df is not None]
 
         if not visible_sims:
             fig.update_layout(
-                template='plotly_dark',
+                template=template,
                 margin=dict(l=60, r=20, t=30, b=50),
                 xaxis_title='Time (minutes)',
                 yaxis_title='O₂ Concentration (µM)',
@@ -564,19 +632,22 @@ class SimulationGUI:
 
             df_probe = sim.df[sim.df['z_idx'] == probe_idx].sort_values('t_mins')
 
+            # Get line dash style
+            dash = LINE_STYLES.get(sim.line_style)
+
             fig.add_trace(go.Scatter(
                 x=df_probe['t_mins'],
                 y=df_probe['C'],
                 mode='lines',
                 name=sim.name,
-                line=dict(color=sim.color, width=2)
+                line=dict(color=sim.color, width=2, dash=dash)
             ))
 
             c_max = max(c_max, sim.df['C'].max())
             c_air_max = max(c_air_max, config.C_air)
 
         fig.update_layout(
-            template='plotly_dark',
+            template=template,
             margin=dict(l=60, r=20, t=30, b=50),
             xaxis_title='Time (minutes)',
             yaxis_title='O₂ Concentration (µM)',
@@ -593,6 +664,8 @@ class SimulationGUI:
 
     def _update_profile_plot(self):
         """Update the vertical profile plot with all visible simulations."""
+        template = self._get_plot_template()
+
         fig = make_subplots(
             rows=1, cols=2,
             column_widths=[0.15, 0.85],
@@ -604,7 +677,7 @@ class SimulationGUI:
 
         if not visible_sims:
             fig.update_layout(
-                template='plotly_dark',
+                template=template,
                 margin=dict(l=60, r=20, t=30, b=50),
             )
             fig.add_annotation(
@@ -651,12 +724,15 @@ class SimulationGUI:
             heights = profile_df['height_mm'].values
             concentrations = profile_df['C'].values
 
+            # Get line dash style
+            dash = LINE_STYLES.get(sim.line_style)
+
             fig.add_trace(go.Scatter(
                 x=concentrations,
                 y=heights,
                 mode='lines',
                 name=sim.name,
-                line=dict(color=sim.color, width=2),
+                line=dict(color=sim.color, width=2, dash=dash),
                 hovertemplate=f'{sim.name}<br>C: %{{x:.1f}} µM<br>Height: %{{y:.2f}} mm<extra></extra>'
             ), row=1, col=2)
 
@@ -677,7 +753,7 @@ class SimulationGUI:
                 ), row=1, col=2)
 
         fig.update_layout(
-            template='plotly_dark',
+            template=template,
             margin=dict(l=60, r=20, t=30, b=50),
             showlegend=True,
             legend=dict(x=1.02, y=0.98),
