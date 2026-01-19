@@ -11,7 +11,7 @@ Models oxygen diffusion in a multiwell plate as a 1D system with:
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 
 from fipy import Grid1D, CellVariable, TransientTerm, DiffusionTerm, ImplicitSourceTerm
 
@@ -37,6 +37,10 @@ class SimulationConfig:
     # no flux across the plastic/glass well bottom barrier
     # however, to model a cell monolayer we can use this
     flux_bottom: float = 0
+
+    # whether we our modeling an open air well (O2 air at top of media)
+    # or a closed system (e.g. sealed at top )
+    top_constraint : Literal['open', 'sealed'] = 'open'
 
     # Time parameters
     dt: Optional[float] = None  # Time step (s), computed from T if None
@@ -132,13 +136,17 @@ def run_simulation(config: SimulationConfig,
                      value=config.C_initial_fraction)
 
     # Boundary conditions:
-    # "right" = air-liquid interface (top surface)
-    C.constrain(1.0, mesh.facesRight)  # Fixed concentration at air interface
+    # "right" = top of media (air-liquid interface for open system)
+    if config.top_constraint == 'open':
+        C.constrain(1.0, mesh.facesRight)  # Fixed concentration at air interface
+    else:
+        #closed/sealed sysetem - enforce no flux boundary at top
+        C.faceGrad.constrain((0,), where=mesh.facesRight)
 
-    # "left" = bottom of well (sealed, no flux)
+    # "left" = bottom of well
     # flux at bottom is either zero (to model sealed plate bottom only)
     # or positive to reprent a cell monlayer consumption
-    C.faceGrad.constrain((0,), where=mesh.facesLeft)
+    C.faceGrad.constrain((config.flux_bottom,), where=mesh.facesLeft)
 
     #FIXME - make implicit and explicit equations and then average for crank nicholson
     eq = ( TransientTerm() == DiffusionTerm(coeff=config.D) - config.k - ImplicitSourceTerm(coeff=config.k1) )
