@@ -21,7 +21,7 @@ class SimulationConfig:
     """Configuration parameters for oxygen diffusion simulation."""
 
     # Physical parameters
-    D: float = 3e-3  # Oxygen diffusion coefficient (mm2/s)
+    D: float = 3e-3  # Oxygen diffusion coefficient (mm2/s) (use ~2.2e-3 for 25C)
     C_air: float = 200.0  # Oxygen concentration at air interface (uM)
 
     # Geometry
@@ -29,7 +29,14 @@ class SimulationConfig:
     nz: int = 200  # Number of mesh points
 
     # Reaction rate (dimensionless)
-    k: float = 1.0  # Consumption rate coefficient
+    k: float = 1.0  # zero order consumption rate
+
+    k1: float = 0  # first order reaction rate
+
+    # flux across bottom of well.  normally, zero to model
+    # no flux across the plastic/glass well bottom barrier
+    # however, to model a cell monolayer we can use this
+    flux_bottom: float = 0
 
     # Time parameters
     dt: Optional[float] = None  # Time step (s), computed from T if None
@@ -38,7 +45,10 @@ class SimulationConfig:
     # Initial condition
     C_initial_fraction: float = 1.0  # Initial concentration as fraction of C_air
 
+    #FIXME - no longer needed
     first_order_reaction: bool = False #whether reaction is zero or first order
+
+    halt_on_C_zero: bool = True #halt simulation when C bottom drops below zero
 
     def __post_init__(self):
         """Compute derived parameters."""
@@ -126,19 +136,15 @@ def run_simulation(config: SimulationConfig,
     C.constrain(1.0, mesh.facesRight)  # Fixed concentration at air interface
 
     # "left" = bottom of well (sealed, no flux)
-    #FIXME - support for monolayer with flux of the monolayer's per-area OCR at bottom layer here instead of
-    # no flux across bottom
-    C.faceGrad.constrain((0,), where=mesh.facesLeft)  # Zero flux at bottom
+    # flux at bottom is either zero (to model sealed plate bottom only)
+    # or positive to reprent a cell monlayer consumption
+    C.faceGrad.constrain((0,), where=mesh.facesLeft)
 
     #FIXME - make implicit and explicit equations and then average for crank nicholson
-    if config.first_order_reaction:
-        eq = ( TransientTerm() == DiffusionTerm(coeff=config.D) - ImplicitSourceTerm(coeff=config.k) )
-        #if config.crank nicholson:
-        #    eqX = ( TransientTerm() == ExplicitDiffusionTerm(coeff=config.D) - SourceTerm(coeff=config.k) )
-        #FIXME
-
-    else:
-        eq = ( TransientTerm() == DiffusionTerm(coeff=config.D) - config.k )
+    eq = ( TransientTerm() == DiffusionTerm(coeff=config.D) - config.k - ImplicitSourceTerm(coeff=config.k1) )
+    #if config.crank nicholson:
+    #    eqX = ( TransientTerm() == ExplicitDiffusionTerm(coeff=config.D) - SourceTerm(coeff=config.k) )
+    #FIXME
 
     if verbose:
         print(f"Running simulation with k={config.k}, Da={config.damkohler:.3f}")
@@ -148,24 +154,33 @@ def run_simulation(config: SimulationConfig,
     # Storage for results
     result = SimulationResult(config=config)
 
+    def _record_step(C):
+        for z_idx, c in enumerate(C.value):
+            result.points.append({
+                'k': config.k,
+                'step': step,
+                'c_star': c,
+                'z_idx': z_idx
+            })
+
     # Time stepping
     for step in range(config.steps):
         if step % record_every == 0:
-            for z_idx, c in enumerate(C.value):
-                result.points.append({
-                    'k': config.k,
-                    'step': step,
-                    'c_star': c,
-                    'z_idx': z_idx
-                })
+            _record_step(C)
             print(step)
 
         eq.solve(var=C, dt=config.dt)
 
-        #halt simulation when C at bottom would go below zero
         if C.value[0] <= 0:
-            break
+            C.value[0] = 0
 
+            if config.halt_on_C_zero:
+                #halt simulation when C at bottom would go below zero
+                _record_step(C)
+                break
+
+        #concentration cannot go below zero anywhere
+        #FIXME - C.value = np.max(C.value, 0)
 
     result.final_profile = C.value.copy()
     return result

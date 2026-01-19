@@ -267,7 +267,7 @@ def calc_parameterized_first_order(ks, volumes=[100], downsample_factor=100, T_m
     return calc_parameterized_profiles(profiles, volumes, downsample_factor, T_minutes)
 
 
-def calc_parameterized_profiles(rate_profiles, volumes=[100],  downsample_factor=100, duration_minutes=60):
+def calc_parameterized_profiles(rate_profiles, volumes=[100],  downsample_factor=100, duration_minutes=30):
     """
     Run simulations across rate profiles, volumes
 
@@ -355,42 +355,19 @@ if __name__ == '__main__':
     ENZYMATIC_REACTION_RATES = [1e-5*v for v in range(1, 200, 10)]#, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3]
 
     #mid range - peak rate reaches zero around 15 minutes, low rate stablizes at non-zero
-    MID_RANGE_REACTION_RATES = [1e-4*v for v in range(1, 60, 10)]
+    MID_RANGE_REACTION_RATES = [1e-5*v for v in range(10, 600, 10)]
+    FULL_RANGE_REACTION_RATES = [1e-5*v for v in range(5, 600, 2)]
 
-
-    if False:
-        RAPID_REACTION_RATES = [1e-3*v for v in range(1, 500, 100)]
-        pts = []
-        for media_vol in [100, 200, 300]:
-            for rate in [5, 25, 50, 100, 200, 400]:
-                rate_profile = ConstantRateUniformHeightProfile(rate)
-                params = ReactionDiffusion1DParams()
-                params.L = media_vol_to_height(media_vol)
-                model = ReactionDiffusion1DModel(params)
-                media_height = media_vol_to_height(media_vol)
-                dz = params.L / (params.Nz - 1)
-                depths = [0.5, 1, 1.5, 2, 2.5]
-                for t_i, concentrations in enumerate(model.run_fdm(rate_profile)):
-                    for d in depths:
-                        #z_i = int(h // params.Nz)
-                        z_i = int (d // dz)
-                        t = t_i * params.dt
-
-                        #height from bottom
-                        h = media_height - d
-
-                        rate = rate_profile.reaction_at_time(t)
-                        if t_i % 100 == 0:
-                            pt = {'rate': rate, 't_seconds': t,
-                                  'c_at_z': concentrations[z_i], 'depth': d, 'height': h, 'media_vol': media_vol}
-                            pts.append(pt)
 
     import pandas as pd
     import seaborn as sns
     import numpy as np
 
     VOLS = [300]
-    df_all = calc_parameterized_constant_rate(MID_RANGE_REACTION_RATES,
+    #df_all = calc_parameterized_constant_rate(FULL_RANGE_REACTION_RATES,
+    #                             volumes=[100, 200, 300], downsample_factor=10)
+    BACTERIAL_RATES = [1e-4* v for v in range(1,30,5 )]
+    df_all = calc_parameterized_constant_rate(BACTERIAL_RATES,
                                  volumes=[100, 200, 300], downsample_factor=10)
     df_all['t_mins'] = df_all['t_s'] / 60
     df_all['z_um'] = df_all.z.apply(lambda z: round(z*1000))
