@@ -4,14 +4,15 @@ NiceGUI application for configuring, running, and visualizing
 Supports multiple simulations with comparison visualization.
 """
 
-from nicegui import ui, run
+from nicegui import ui, run, events
 import asyncio
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from dataclasses import dataclass, field
 from typing import Optional
-import colorsys
+import json
+from datetime import datetime
 
 from rxd_fipy_1d import SimulationConfig, SimulationResult, run_simulation
 from conversions import rate_pmols_per_L_per_minute_to_umolar_per_s, flux_fmols_per_mm2_per_s_to_umolar_per_s
@@ -148,7 +149,13 @@ class SimulationGUI:
         with ui.card().classes('w-full'):
             with ui.row().classes('items-center justify-between mb-2'):
                 ui.label('Simulations').classes('text-lg font-bold')
-                ui.button(icon='add', on_click=self._add_new_simulation).props('flat dense')
+                ui.button(icon='add', on_click=self._add_new_simulation).props('flat dense').tooltip('New simulation')
+            with ui.row().classes('items-center justify-between mb-2'):
+                ui.upload(
+                    on_upload=self._load_simulation,
+                    auto_upload=True,
+                    max_files=1
+                ).props('flat dense accept=.json').classes('w-full').tooltip('Load simulation from file')
 
             self.sim_list_container = ui.column().classes('w-full gap-1')
             self._refresh_sim_list()
@@ -197,9 +204,10 @@ class SimulationGUI:
 
             # Action buttons
             with ui.row().classes('gap-1'):
-                ui.button(icon='edit', on_click=lambda idx=index: self._edit_simulation(idx)).props('flat dense size=sm')
-                ui.button(icon='play_arrow', on_click=lambda idx=index: self._run_single_simulation(idx)).props('flat dense size=sm')
-                ui.button(icon='delete', on_click=lambda idx=index: self._delete_simulation(idx)).props('flat dense size=sm color=red')
+                ui.button(icon='edit', on_click=lambda idx=index: self._edit_simulation(idx)).props('flat dense size=sm').tooltip('Edit')
+                ui.button(icon='play_arrow', on_click=lambda idx=index: self._run_single_simulation(idx)).props('flat dense size=sm').tooltip('Run')
+                ui.button(icon='download', on_click=lambda idx=index: self._save_single_simulation(idx)).props('flat dense size=sm').tooltip('Save to file')
+                ui.button(icon='delete', on_click=lambda idx=index: self._delete_simulation(idx)).props('flat dense size=sm color=red').tooltip('Delete')
 
     def _toggle_visibility(self, index: int, visible: bool):
         """Toggle simulation visibility."""
@@ -442,6 +450,63 @@ class SimulationGUI:
         self._refresh_sim_list()
         self._update_timeseries_plot()
         self._update_profile_plot()
+
+    def _save_single_simulation(self, index: int):
+        """Save a single simulation to JSON file."""
+        sim = self.simulations[index]
+        data = {
+            'name': sim.name,
+            'config_values': sim.config_values,
+            'color': sim.color,
+            'line_style': sim.line_style,
+            'result': sim.result.__getstate__() if sim.result else None,
+        }
+        json_str = json.dumps(data, indent=2)
+
+        # Sanitize name for filename
+        safe_name = ''.join(c if c.isalnum() or c in '-_' else '_' for c in sim.name)
+        filename = f'{safe_name}.json'
+        ui.download(json_str.encode('utf-8'), filename)
+
+        self.status_label.text = f'Saved: {sim.name}'
+        self.status_label.classes('text-green-400', remove='text-gray-400 text-yellow-400')
+
+    async def _load_simulation(self, e: events.UploadEventArguments):
+        """Load a simulation from JSON file."""
+        try:
+            content = await e.file.text()
+            data = json.loads(content)
+
+            # Create simulation entry
+            sim = SimulationEntry(
+                name=data['name'],
+                config_values=data['config_values'],
+                color=data.get('color', self._get_next_color()),
+                line_style=data.get('line_style', 'solid'),
+            )
+
+            # Restore result if present
+            if data.get('result'):
+                sim.result = SimulationResult.__new__(SimulationResult)
+                sim.result.__setstate__(data['result'])
+                sim.df = sim.result.to_dataframe()
+
+            self.simulations.append(sim)
+            self.next_sim_id += 1
+
+            self._refresh_sim_list()
+            self._update_slider_ranges()
+            self._update_timeseries_plot()
+            self._update_profile_plot()
+
+            has_result = 'with results' if sim.result else 'no results'
+            self.status_label.text = f'Loaded: {sim.name} ({has_result})'
+            self.status_label.classes('text-green-400', remove='text-gray-400 text-yellow-400 text-red-400')
+
+        except Exception as ex:
+            self.status_label.text = f'Load error: {str(ex)}'
+            self.status_label.classes('text-red-400', remove='text-gray-400 text-yellow-400 text-green-400')
+            raise
 
     def _create_config_from_values(self, values: dict) -> SimulationConfig:
         """Create SimulationConfig from config values dict."""
