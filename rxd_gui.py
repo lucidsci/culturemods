@@ -15,6 +15,7 @@ import json
 from datetime import datetime
 
 from rxd_fipy_1d import SimulationConfig, SimulationResult, run_simulation
+import kinetics
 
 
 # Color palette for multiple simulations
@@ -95,8 +96,14 @@ class SimulationGUI:
     def _default_config(self) -> dict:
         """Return default configuration values."""
         return {
+            # Mode selection
+            'mode': 'suspension',  # 'suspension' or 'monolayer'
+
+            # Common parameters
             'D': 3e-3,
             'C_air': 200.0,
+
+            # Suspension mode parameters
             'L': 3.1,
             'nz': 100,
             'rate': 10,  # umolar / min
@@ -107,6 +114,13 @@ class SimulationGUI:
             'steps': 1800,
             'C_initial_fraction': 1.0,
             'halt_on_C_zero': True,
+
+            # Monolayer mode parameters
+            'flux': 100.0,  # fmol/mm²/s (OCR)
+            'media_vol': 100.0,  # µL
+            'well_radius': 3.2,  # mm (96-well default)
+            'duration_hrs': 4.0,  # simulation duration in hours
+            'time_step_s': 30,  # time step in seconds
         }
 
     def _get_next_color(self) -> str:
@@ -252,6 +266,10 @@ class SimulationGUI:
         self.editor_card.visible = True
         self.editor_container.clear()
 
+        # Ensure mode exists in editor_values (for backwards compatibility)
+        if 'mode' not in self.editor_values:
+            self.editor_values['mode'] = 'suspension'
+
         with self.editor_container:
             # Header
             with ui.row().classes('w-full items-center justify-between mb-2'):
@@ -268,7 +286,7 @@ class SimulationGUI:
 
             with ui.row().classes('w-full items-center gap-4'):
                 ui.label('Color:').classes('text-sm')
-                color_input = ui.color_input(
+                ui.color_input(
                     value=self.editor_color,
                     on_change=lambda e: setattr(self, 'editor_color', e.value)
                 ).classes('w-24')
@@ -282,7 +300,37 @@ class SimulationGUI:
 
             ui.separator()
 
-            # Physical parameters
+            # Mode selection
+            ui.label('Simulation Mode').classes('font-semibold text-blue-400')
+
+            # Container for mode-specific parameters (created later)
+            params_container = None
+
+            def update_mode(e):
+                self._update_editor('mode', e.value)
+                self._rebuild_mode_params(params_container, name_input)
+
+            ui.toggle(
+                ['suspension', 'monolayer'],
+                value=self.editor_values.get('mode', 'suspension'),
+                on_change=update_mode
+            ).classes('w-full')
+
+            # Now create the params container after the toggle
+            params_container = ui.column().classes('w-full gap-2')
+
+            # Build initial mode parameters
+            self._rebuild_mode_params(params_container, name_input)
+
+    def _rebuild_mode_params(self, container, name_input):
+        """Rebuild the mode-specific parameters in the editor."""
+        container.clear()
+        mode = self.editor_values.get('mode', 'suspension')
+
+        with container:
+            ui.separator()
+
+            # Common parameters
             ui.label('Physical Parameters').classes('font-semibold text-blue-400')
 
             ui.number(
@@ -294,98 +342,16 @@ class SimulationGUI:
             ).classes('w-full')
 
             ui.number(
-                'C_air (µM)',
+                'C_air / C_initial (µM)',
                 value=self.editor_values['C_air'],
                 format='%.1f',
                 on_change=lambda e: self._update_editor('C_air', e.value)
             ).classes('w-full')
 
-            ui.number(
-                'Well depth L (mm)',
-                value=self.editor_values['L'],
-                format='%.2f',
-                step=0.1,
-                on_change=lambda e: self._update_editor('L', e.value)
-            ).classes('w-full')
-
-            ui.number(
-                'Mesh points (nz)',
-                value=self.editor_values['nz'],
-                format='%.0f',
-                min=10, max=500, step=10,
-                on_change=lambda e: self._update_editor('nz', int(e.value))
-            ).classes('w-full')
-
-            ui.separator()
-
-            # Reaction parameters
-            ui.label('Reaction Parameters').classes('font-semibold text-blue-400')
-
-            ui.number(
-                'Zero-order rate (micromolar/min)',
-                value=self.editor_values['rate'],
-                format='%.1f',
-                step=0.1,
-                on_change=lambda e: self._update_editor('rate', e.value)
-            ).classes('w-full')
-
-            ui.number(
-                'First-order rate k1',
-                value=self.editor_values['k1'],
-                format='%.6f',
-                step=0.001, min=0,
-                on_change=lambda e: self._update_editor('k1', e.value)
-            ).classes('w-full')
-
-            ui.number(
-                'Bottom flux (fmol/mm²/s)',
-                value=self.editor_values['flux_bottom'],
-                format='%.2f',
-                step=0.1, min=0,
-                on_change=lambda e: self._update_editor('flux_bottom', e.value)
-            ).classes('w-full')
-
-            ui.select(
-                ['open', 'sealed'],
-                value=self.editor_values['top_constraint'],
-                label='Top boundary',
-                on_change=lambda e: self._update_editor('top_constraint', e.value)
-            ).classes('w-full')
-
-            ui.separator()
-
-            # Time parameters
-            ui.label('Time Parameters').classes('font-semibold text-blue-400')
-
-            ui.number(
-                'Time step dt (s)',
-                value=self.editor_values['dt'],
-                format='%.2f',
-                step=0.1, min=0.01,
-                on_change=lambda e: self._update_editor('dt', e.value)
-            ).classes('w-full')
-
-            ui.number(
-                'Number of steps',
-                value=self.editor_values['steps'],
-                format='%.0f',
-                min=1, max=10000, step=10,
-                on_change=lambda e: self._update_editor('steps', int(e.value))
-            ).classes('w-full')
-
-            ui.number(
-                'Initial C fraction',
-                value=self.editor_values['C_initial_fraction'],
-                format='%.2f',
-                min=0, max=1, step=0.1,
-                on_change=lambda e: self._update_editor('C_initial_fraction', e.value)
-            ).classes('w-full')
-
-            ui.checkbox(
-                'Halt when C=0',
-                value=self.editor_values['halt_on_C_zero'],
-                on_change=lambda e: self._update_editor('halt_on_C_zero', e.value)
-            )
+            if mode == 'suspension':
+                self._build_suspension_params()
+            else:
+                self._build_monolayer_params()
 
             ui.separator()
 
@@ -400,6 +366,149 @@ class SimulationGUI:
                     on_click=lambda: self._save_simulation(name_input.value)
                 ).classes('flex-grow')
                 ui.button('Cancel', on_click=self._hide_editor).classes('flex-grow')
+
+    def _build_suspension_params(self):
+        """Build suspension mode parameters."""
+        ui.number(
+            'Well depth L (mm)',
+            value=self.editor_values['L'],
+            format='%.2f',
+            step=0.1,
+            on_change=lambda e: self._update_editor('L', e.value)
+        ).classes('w-full')
+
+        ui.number(
+            'Mesh points (nz)',
+            value=self.editor_values['nz'],
+            format='%.0f',
+            min=10, max=500, step=10,
+            on_change=lambda e: self._update_editor('nz', int(e.value))
+        ).classes('w-full')
+
+        ui.separator()
+
+        ui.label('Reaction Parameters').classes('font-semibold text-blue-400')
+
+        ui.number(
+            'Zero-order rate (µM/min)',
+            value=self.editor_values['rate'],
+            format='%.1f',
+            step=0.1,
+            on_change=lambda e: self._update_editor('rate', e.value)
+        ).classes('w-full')
+
+        ui.number(
+            'First-order rate k1',
+            value=self.editor_values['k1'],
+            format='%.6f',
+            step=0.001, min=0,
+            on_change=lambda e: self._update_editor('k1', e.value)
+        ).classes('w-full')
+
+        ui.number(
+            'Bottom flux (fmol/mm²/s)',
+            value=self.editor_values['flux_bottom'],
+            format='%.2f',
+            step=0.1, min=0,
+            on_change=lambda e: self._update_editor('flux_bottom', e.value)
+        ).classes('w-full')
+
+        ui.select(
+            ['open', 'sealed'],
+            value=self.editor_values['top_constraint'],
+            label='Top boundary',
+            on_change=lambda e: self._update_editor('top_constraint', e.value)
+        ).classes('w-full')
+
+        ui.separator()
+
+        ui.label('Time Parameters').classes('font-semibold text-blue-400')
+
+        ui.number(
+            'Time step dt (s)',
+            value=self.editor_values['dt'],
+            format='%.2f',
+            step=0.1, min=0.01,
+            on_change=lambda e: self._update_editor('dt', e.value)
+        ).classes('w-full')
+
+        ui.number(
+            'Number of steps',
+            value=self.editor_values['steps'],
+            format='%.0f',
+            min=1, max=10000, step=10,
+            on_change=lambda e: self._update_editor('steps', int(e.value))
+        ).classes('w-full')
+
+        ui.number(
+            'Initial C fraction',
+            value=self.editor_values['C_initial_fraction'],
+            format='%.2f',
+            min=0, max=1, step=0.1,
+            on_change=lambda e: self._update_editor('C_initial_fraction', e.value)
+        ).classes('w-full')
+
+        ui.checkbox(
+            'Halt when C=0',
+            value=self.editor_values['halt_on_C_zero'],
+            on_change=lambda e: self._update_editor('halt_on_C_zero', e.value)
+        )
+
+    def _build_monolayer_params(self):
+        """Build monolayer mode parameters."""
+        ui.separator()
+
+        ui.label('Monolayer Parameters').classes('font-semibold text-blue-400')
+
+        ui.number(
+            'O₂ flux / OCR (fmol/mm²/s)',
+            value=self.editor_values.get('flux', 100.0),
+            format='%.1f',
+            step=10, min=0,
+            on_change=lambda e: self._update_editor('flux', e.value)
+        ).classes('w-full')
+
+        ui.number(
+            'Media volume (µL)',
+            value=self.editor_values.get('media_vol', 100.0),
+            format='%.1f',
+            step=10, min=10,
+            on_change=lambda e: self._update_editor('media_vol', e.value)
+        ).classes('w-full')
+
+        ui.number(
+            'Well radius (mm)',
+            value=self.editor_values.get('well_radius', 3.2),
+            format='%.2f',
+            step=0.1, min=0.5,
+            on_change=lambda e: self._update_editor('well_radius', e.value)
+        ).classes('w-full')
+
+        # Show calculated media height
+        vol = self.editor_values.get('media_vol', 100.0)
+        radius = self.editor_values.get('well_radius', 3.2)
+        height = kinetics.media_vol_to_height(vol, radius)
+        ui.label(f'Media height: {height:.2f} mm').classes('text-sm text-gray-400')
+
+        ui.separator()
+
+        ui.label('Time Parameters').classes('font-semibold text-blue-400')
+
+        ui.number(
+            'Duration (hours)',
+            value=self.editor_values.get('duration_hrs', 4.0),
+            format='%.1f',
+            step=0.5, min=0.1,
+            on_change=lambda e: self._update_editor('duration_hrs', e.value)
+        ).classes('w-full')
+
+        ui.number(
+            'Time step (s)',
+            value=self.editor_values.get('time_step_s', 30),
+            format='%.0f',
+            step=10, min=1,
+            on_change=lambda e: self._update_editor('time_step_s', int(e.value))
+        ).classes('w-full')
 
     def _hide_editor(self):
         """Hide the configuration editor."""
@@ -568,6 +677,7 @@ class SimulationGUI:
             return
 
         sim = self.simulations[index]
+        mode = sim.config_values.get('mode', 'suspension')
 
         self.is_running = True
         self.status_label.text = f'Running {sim.name}...'
@@ -578,23 +688,10 @@ class SimulationGUI:
         self.current_step = 0
 
         try:
-            config = self._create_config_from_values(sim.config_values)
-            self.total_steps = config.steps
-
-            progress_timer = ui.timer(0.1, self._update_progress)
-
-            sim.result = await run.io_bound(
-                run_simulation,
-                config,
-                record_every=1,
-                verbose=False,
-                step_callback=self._step_callback
-            )
-
-            progress_timer.cancel()
-            self.progress_bar.value = 1.0
-
-            sim.df = sim.result.to_dataframe()
+            if mode == 'monolayer':
+                await self._run_monolayer_simulation(sim)
+            else:
+                await self._run_suspension_simulation(sim)
 
             # Update slider ranges based on all simulations
             self._update_slider_ranges()
@@ -615,6 +712,119 @@ class SimulationGUI:
             self.is_running = False
             await asyncio.sleep(1.0)
             self.progress_bar.visible = False
+
+    async def _run_suspension_simulation(self, sim: SimulationEntry):
+        """Run a suspension mode simulation using FiPy."""
+        config = self._create_config_from_values(sim.config_values)
+        self.total_steps = config.steps
+
+        progress_timer = ui.timer(0.1, self._update_progress)
+
+        sim.result = await run.io_bound(
+            run_simulation,
+            config,
+            record_every=1,
+            verbose=False,
+            step_callback=self._step_callback
+        )
+
+        progress_timer.cancel()
+        self.progress_bar.value = 1.0
+
+        sim.df = sim.result.to_dataframe()
+
+    async def _run_monolayer_simulation(self, sim: SimulationEntry):
+        """Run a monolayer mode simulation using kinetics.py analytical solution."""
+        import pandas as pd
+
+        values = sim.config_values
+        flux_fmol = values.get('flux', 100.0)
+        media_vol = values.get('media_vol', 100.0)
+        well_radius = values.get('well_radius', 3.2)
+        c_initial = values.get('C_air', 200.0)
+        duration_hrs = values.get('duration_hrs', 4.0)
+        time_step_s = values.get('time_step_s', 30)
+        D = values.get('D', 3e-3)
+
+        # Convert flux to units expected by kinetics.py (µmol/mm²/s)
+        Q = kinetics.flux_units_convert(flux_fmol)
+
+        # Calculate media height from volume
+        media_height = kinetics.media_vol_to_height(media_vol, well_radius)
+
+        # Generate time points
+        duration_s = int(duration_hrs * 3600)
+        time_points = list(range(0, duration_s + 1, time_step_s))
+        self.total_steps = len(time_points)
+
+        # Number of spatial points
+        nz = 20
+        dz = media_height / nz
+
+        progress_timer = ui.timer(0.1, self._update_progress)
+
+        # Run simulation in background
+        def run_kinetics():
+            points = []
+            for step, t_s in enumerate(time_points):
+                self.current_step = step
+                for z_idx in range(nz):
+                    height = z_idx * dz
+                    # kinetics.concentration expects position from bottom
+                    c = kinetics.concentration(height, t_s, Q, c_initial, media_height)
+                    c = max(0, c)  # Clamp to non-negative
+                    c_star = c / c_initial
+
+                    points.append({
+                        'k': flux_fmol,  # Store flux as 'k' for compatibility
+                        'step': step,
+                        'c_star': c_star,
+                        'z_idx': z_idx,
+                        'C': c,
+                        'height_mm': height,
+                        't_hrs': t_s / 3600,
+                        't_mins': t_s / 60,
+                        't_s': t_s,
+                    })
+            return points
+
+        points = await run.io_bound(run_kinetics)
+
+        progress_timer.cancel()
+        self.progress_bar.value = 1.0
+
+        # Create DataFrame directly (no SimulationResult for monolayer)
+        sim.df = pd.DataFrame(points)
+
+        # Create a minimal result object for compatibility
+        # Store config info needed for plotting
+        sim.result = type('MonolayerResult', (), {
+            'config': type('Config', (), {
+                'L': media_height,
+                'nz': nz,
+                'dz': dz,
+                'C_air': c_initial,
+                'dt': time_step_s,
+            })(),
+            'final_profile': None,
+            'points': points,
+            'to_dataframe': lambda: sim.df,
+            'get_profile_at_step': lambda _, step: sim.df[sim.df['step'] == step].sort_values('z_idx'),
+            '__getstate__': lambda: {
+                'config': {
+                    'mode': 'monolayer',
+                    'flux': flux_fmol,
+                    'media_vol': media_vol,
+                    'well_radius': well_radius,
+                    'C_air': c_initial,
+                    'D': D,
+                    'duration_hrs': duration_hrs,
+                    'time_step_s': time_step_s,
+                },
+                'points': points,
+                'final_profile': None,
+            },
+        })()
 
     def _step_callback(self, step: int):
         """Callback for simulation progress."""
