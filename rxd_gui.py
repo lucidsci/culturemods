@@ -15,7 +15,6 @@ import json
 from datetime import datetime
 
 from rxd_fipy_1d import SimulationConfig, SimulationResult, run_simulation
-from conversions import rate_pmols_per_L_per_minute_to_umolar_per_s, flux_fmols_per_mm2_per_s_to_umolar_per_s
 
 
 # Color palette for multiple simulations
@@ -100,7 +99,7 @@ class SimulationGUI:
             'C_air': 200.0,
             'L': 3.1,
             'nz': 100,
-            'rate': 5,  # pmols/L/min
+            'rate': 10,  # umolar / min
             'k1': 0.0,
             'flux_bottom': 0.0,  # fmol/mm²/s
             'top_constraint': 'open',
@@ -154,8 +153,8 @@ class SimulationGUI:
                 ui.upload(
                     on_upload=self._load_simulation,
                     auto_upload=True,
-                    max_files=1
-                ).props('flat dense accept=.json').classes('w-full').tooltip('Load simulation from file')
+                    multiple=True,
+                ).props('flat dense accept=.json').classes('w-full').tooltip('Load simulations from file(s)')
 
             self.sim_list_container = ui.column().classes('w-full gap-1')
             self._refresh_sim_list()
@@ -322,7 +321,7 @@ class SimulationGUI:
             ui.label('Reaction Parameters').classes('font-semibold text-blue-400')
 
             ui.number(
-                'Zero-order rate (pmol/L/min)',
+                'Zero-order rate (micromolar/min)',
                 value=self.editor_values['rate'],
                 format='%.1f',
                 step=0.1,
@@ -513,8 +512,8 @@ class SimulationGUI:
         C_air = values['C_air']
         L = values['L']
 
-        # Convert volumetric reaction rate
-        rate_umolar_per_s = rate_pmols_per_L_per_minute_to_umolar_per_s(values['rate'])
+        # Convert volumetric reaction rate - umolar/min to umolar/s
+        rate_umolar_per_s = values['rate']/60
         k = rate_umolar_per_s / C_air
 
         dt = values['dt']
@@ -636,7 +635,7 @@ class SimulationGUI:
                 ui.label('Vertical Concentration Profile').classes('text-lg font-bold')
                 ui.label('Time step:').classes('text-sm')
                 self.step_slider = ui.slider(
-                    min=0, max=1800, step=1, value=self.profile_step,
+                    min=0, max=1800, step=60, value=self.profile_step,
                     on_change=self._on_step_change
                 ).classes('w-48')
                 self.step_label = ui.label('Step 0 (0.0 s)').classes('text-sm w-32')
