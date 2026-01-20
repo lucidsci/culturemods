@@ -414,12 +414,20 @@ class SimulationGUI:
         if self.editing_index >= 0:
             # Update existing
             sim = self.simulations[self.editing_index]
+
+            # Check if config values changed (not just appearance)
+            config_changed = sim.config_values != self.editor_values
+
+            # Update appearance (always safe)
             sim.name = name
-            sim.config_values = self.editor_values.copy()
             sim.color = self.editor_color
             sim.line_style = self.editor_line_style
-            sim.result = None  # Clear results since config changed
-            sim.df = None
+
+            # Only clear results if config actually changed
+            if config_changed:
+                sim.config_values = self.editor_values.copy()
+                sim.result = None
+                sim.df = None
         else:
             # Create new
             sim = SimulationEntry(
