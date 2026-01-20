@@ -83,6 +83,25 @@ class SimulationResult:
     points: List[Dict[str, Any]] = field(default_factory=list)
     final_profile: Optional[np.ndarray] = None
 
+    def __getstate__(self) -> Dict[str, Any]:
+        """Serialize for pickle/JSON. Converts numpy arrays to lists."""
+        from dataclasses import asdict
+        config_dict = asdict(self.config)
+        # Remove derived fields computed in __post_init__
+        for key in ['dz', 'T', 'total_time']:
+            config_dict.pop(key, None)
+        return {
+            'config': config_dict,
+            'points': self.points,
+            'final_profile': self.final_profile.tolist() if self.final_profile is not None else None,
+        }
+
+    def __setstate__(self, state: Dict[str, Any]):
+        """Deserialize from pickle/JSON."""
+        self.config = SimulationConfig(**state['config'])
+        self.points = state['points']
+        self.final_profile = np.array(state['final_profile']) if state['final_profile'] is not None else None
+
     def to_dataframe(self):
         """Convert results to a pandas DataFrame with dimensionalized units."""
         import pandas as pd
