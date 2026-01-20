@@ -25,9 +25,6 @@ def rate_umolar_per_second_to_molar_per_hour(rate_umolar_per_s):
 def rate_mols_per_L_per_hour_umolar_per_s(rate):
     return rate * 1e6 / 3600
 
-def rate_pmols_per_L_per_minute_to_umolar_per_s(rate):
-    return rate * 60 / 1e3
-
 def flux_fmols_per_mm2_per_s_to_umolar_per_s(flux, length_mm=1.0):
     """Convert flux in fmol/mm²/s to volumetric rate in µM/s.
 
