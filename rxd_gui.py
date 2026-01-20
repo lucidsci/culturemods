@@ -205,7 +205,8 @@ class SimulationGUI:
             with ui.row().classes('gap-1'):
                 ui.button(icon='edit', on_click=lambda idx=index: self._edit_simulation(idx)).props('flat dense size=sm').tooltip('Edit')
                 ui.button(icon='play_arrow', on_click=lambda idx=index: self._run_single_simulation(idx)).props('flat dense size=sm').tooltip('Run')
-                ui.button(icon='download', on_click=lambda idx=index: self._save_single_simulation(idx)).props('flat dense size=sm').tooltip('Save to file')
+                ui.button(icon='download', on_click=lambda idx=index: self._save_single_simulation(idx)).props('flat dense size=sm').tooltip('Save to JSON')
+                ui.button(icon='table_chart', on_click=lambda idx=index: self._export_csv(idx)).props('flat dense size=sm').tooltip('Export CSV')
                 ui.button(icon='delete', on_click=lambda idx=index: self._delete_simulation(idx)).props('flat dense size=sm color=red').tooltip('Delete')
 
     def _toggle_visibility(self, index: int, visible: bool):
@@ -476,6 +477,24 @@ class SimulationGUI:
         ui.download(json_str.encode('utf-8'), filename)
 
         self.status_label.text = f'Saved: {sim.name}'
+        self.status_label.classes('text-green-400', remove='text-gray-400 text-yellow-400')
+
+    def _export_csv(self, index: int):
+        """Export simulation results as CSV file."""
+        sim = self.simulations[index]
+        if sim.df is None:
+            self.status_label.text = f'No results to export for {sim.name}'
+            self.status_label.classes('text-yellow-400', remove='text-gray-400 text-green-400 text-red-400')
+            return
+
+        csv_str = sim.df.to_csv(index=False)
+
+        # Sanitize name for filename
+        safe_name = ''.join(c if c.isalnum() or c in '-_' else '_' for c in sim.name)
+        filename = f'{safe_name}.csv'
+        ui.download(csv_str.encode('utf-8'), filename)
+
+        self.status_label.text = f'Exported CSV: {sim.name}'
         self.status_label.classes('text-green-400', remove='text-gray-400 text-yellow-400')
 
     async def _load_simulation(self, e: events.UploadEventArguments):
