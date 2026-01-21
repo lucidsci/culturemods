@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "culturemods"
+version = "0.1.0"
+description = "Oxygen diffusion-reaction models for cell culture systems"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    { name = "rabryan" },
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "fipy",
+    "click",
+    "matplotlib",
+    "seaborn",
+]
+
+[project.optional-dependencies]
+gui = [
+    "nicegui",
+    "plotly",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+]
+
+[project.scripts]
+culturemods = "culturemods.cli:cmds"
+culturemods-gui = "culturemods.gui:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/culturemods"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
