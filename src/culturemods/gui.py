@@ -170,6 +170,7 @@ class SimulationGUI:
                     on_upload=self._load_simulation,
                     auto_upload=True,
                     multiple=True,
+                    label = "Upload saved",
                 ).props('flat dense accept=.json').classes('w-full').tooltip('Load simulations from file(s)')
 
             self.sim_list_container = ui.column().classes('w-full gap-1')
