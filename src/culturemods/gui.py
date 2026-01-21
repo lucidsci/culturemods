@@ -72,6 +72,7 @@ class SimulationGUI:
         # Visualization parameters
         self.probe_height_mm = 1.0
         self.profile_step = 0
+        self.heatmap_sim_name = None  # Which simulation to use for heatmap (None = first visible)
 
         # Theme
         self.dark_mode = True
@@ -82,6 +83,7 @@ class SimulationGUI:
         self.status_label = None
         self.probe_slider = None
         self.step_slider = None
+        self.heatmap_select = None
         self.progress_bar = None
         self.sim_list_container = None
         self.editor_container = None
@@ -565,6 +567,7 @@ class SimulationGUI:
         """Delete a simulation."""
         del self.simulations[index]
         self._refresh_sim_list()
+        self._update_heatmap_select_options()
         self._update_timeseries_plot()
         self._update_profile_plot()
 
@@ -851,6 +854,9 @@ class SimulationGUI:
         if self.step_slider:
             self.step_slider._props['max'] = max_steps
 
+        # Update heatmap simulation selector
+        self._update_heatmap_select_options()
+
     def _build_visualization_panel(self):
         """Build the visualization panel with plots."""
         # Timeseries plot card
@@ -876,6 +882,13 @@ class SimulationGUI:
                     on_change=self._on_step_change
                 ).classes('w-48')
                 self.step_label = ui.label('Step 0 (0.0 s)').classes('text-sm w-32')
+            with ui.row().classes('items-center gap-4 mb-2'):
+                ui.label('Gradient Profile:').classes('text-sm')
+                self.heatmap_select = ui.select(
+                    options=[],
+                    value=None,
+                    on_change=self._on_heatmap_sim_change
+                ).classes('w-40').props('dense')
 
             self.profile_plot = ui.plotly({}).classes('w-full h-[400px]')
 
@@ -898,6 +911,27 @@ class SimulationGUI:
                 self.step_label.text = f'Step {self.profile_step} ({t_s:.1f} s)'
                 break
         self._update_profile_plot()
+
+    def _on_heatmap_sim_change(self, e):
+        """Handle heatmap simulation selection change."""
+        self.heatmap_sim_name = e.value
+        self._update_profile_plot()
+
+    def _update_heatmap_select_options(self):
+        """Update the heatmap simulation selector options."""
+        if not self.heatmap_select:
+            return
+
+        # Get list of simulations with results
+        options = {sim.name: sim.name for sim in self.simulations if sim.result is not None}
+
+        self.heatmap_select.options = options
+        self.heatmap_select.update()
+
+        # If current selection is no longer valid, reset to None (first visible)
+        if self.heatmap_sim_name and self.heatmap_sim_name not in options:
+            self.heatmap_sim_name = None
+            self.heatmap_select.value = None
 
     def _update_timeseries_plot(self):
         """Update the timeseries plot with all visible simulations."""
@@ -993,14 +1027,24 @@ class SimulationGUI:
         c_max = 0
         max_L = 0
 
-        # Use first visible simulation for heatmap
-        first_sim = visible_sims[0]
-        first_config = first_sim.result.config
-        first_profile = first_sim.result.get_profile_at_step(self.profile_step)
+        # Find simulation to use for heatmap
+        heatmap_sim = None
+        if self.heatmap_sim_name:
+            # Use selected simulation if it exists and has results
+            for sim in self.simulations:
+                if sim.name == self.heatmap_sim_name and sim.result is not None:
+                    heatmap_sim = sim
+                    break
+        if heatmap_sim is None:
+            # Default to first visible simulation
+            heatmap_sim = visible_sims[0]
 
-        if len(first_profile) > 0:
-            heights = first_profile['height_mm'].values
-            concentrations = first_profile['C'].values
+        heatmap_config = heatmap_sim.result.config
+        heatmap_profile = heatmap_sim.result.get_profile_at_step(self.profile_step)
+
+        if len(heatmap_profile) > 0:
+            heights = heatmap_profile['height_mm'].values
+            concentrations = heatmap_profile['C'].values
             z_data = np.array(concentrations).reshape(-1, 1)
 
             fig.add_trace(go.Heatmap(
@@ -1009,9 +1053,9 @@ class SimulationGUI:
                 y=heights,
                 colorscale='RdYlBu_r',
                 zmin=0,
-                zmax=first_config.C_air,
+                zmax=heatmap_config.C_air,
                 showscale=False,
-                hovertemplate='Height: %{y:.2f} mm<br>C: %{z:.1f} µM<extra></extra>'
+                hovertemplate=f'{heatmap_sim.name}<br>Height: %{{y:.2f}} mm<br>C: %{{z:.1f}} µM<extra></extra>'
             ), row=1, col=1)
 
         # Add line plots for all visible simulations
