@@ -1387,12 +1387,15 @@ class SimulationGUI:
         y_min = 0
         c_air_max = 0
 
+
         for sim in visible_sims:
             config = sim.result.config
             probe_idx = int(self.probe_height_mm / config.dz)
             probe_idx = max(0, min(probe_idx, config.nz - 1))
 
             df_probe = sim.df[sim.df['z_idx'] == probe_idx].sort_values('t_mins')
+            y_min = min(y_min, np.nanmin(df_probe[y_col]))
+            y_max = max(y_max, np.nanmax(df_probe[y_col]))
 
             # Get line dash style
             dash = LINE_STYLES.get(sim.line_style)
@@ -1411,11 +1414,6 @@ class SimulationGUI:
                 line=dict(color=sim.color, width=2, dash=dash)
             ))
 
-            if y_col in sim.df.columns:
-                col_values = sim.df[y_col].dropna()
-                if len(col_values) > 0:
-                    y_max = max(y_max, col_values.max())
-                    y_min = min(y_min, col_values.min())
             c_air_max = max(c_air_max, config.C_air)
 
         # Set y-axis range
@@ -1433,7 +1431,7 @@ class SimulationGUI:
             yaxis_title=y_label,
             yaxis=dict(range=y_range),
             showlegend=True,
-            legend=dict(x=0.02, y=0.98),
+            legend=dict(x=0.9, y=0.98, xref='container', yref='container'),
         )
 
         # Add C_air reference line only for concentration mode
