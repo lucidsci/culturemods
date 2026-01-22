@@ -35,11 +35,11 @@ def calculate_discrete_rate_at_heights(df):
 COLORS = [
     '#00d4aa',  # teal
     '#ff6b6b',  # red
-    '#4ecdc4',  # cyan
+    '#aa96da',  # purple
     '#ffe66d',  # yellow
+    '#4ecdc4',  # cyan
     '#95e1d3',  # mint
     '#f38181',  # coral
-    '#aa96da',  # purple
     '#fcbad3',  # pink
 ]
 
@@ -1502,7 +1502,7 @@ class SimulationGUI:
                 ui.label('Vertical Concentration Profile').classes('text-lg font-bold')
                 ui.label('Time step:').classes('text-sm')
                 self.step_slider = ui.slider(
-                    min=0, max=1800, step=60, value=self.profile_step,
+                    min=0, max=1800, step=10, value=self.profile_step,
                     on_change=self._on_step_change
                 ).classes('w-48')
                 self.step_label = ui.label('Step 0 (0.0 s)').classes('text-sm w-32')
