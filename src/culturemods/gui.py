@@ -179,6 +179,7 @@ class SimulationGUI:
                 with ui.row().classes('gap-1'):
                     ui.button(icon='add', on_click=self._add_new_simulation).props('flat dense').tooltip('New simulation')
                     ui.button(icon='playlist_add', on_click=self._show_batch_add_dialog).props('flat dense').tooltip('Batch add simulations')
+                    ui.button(icon='play_circle', on_click=self._run_all_simulations).props('flat dense').tooltip('Run all simulations')
             with ui.row().classes('items-center justify-between mb-2'):
                 ui.upload(
                     on_upload=self._load_simulation,
@@ -926,6 +927,28 @@ class SimulationGUI:
             C_initial_fraction=values['C_initial_fraction'],
             halt_on_C_zero=values['halt_on_C_zero'],
         )
+
+    async def _run_all_simulations(self):
+        """Run all simulations that haven't been run yet."""
+        if self.is_running:
+            return
+
+        # Find simulations without results
+        pending = [(i, sim) for i, sim in enumerate(self.simulations) if sim.result is None]
+
+        if not pending:
+            self.status_label.text = 'All simulations already have results'
+            self.status_label.classes('text-yellow-400', remove='text-gray-400 text-green-400')
+            return
+
+        total = len(pending)
+        for count, (index, sim) in enumerate(pending, 1):
+            self.status_label.text = f'Running {count}/{total}: {sim.name}'
+            self.status_label.classes('text-yellow-400', remove='text-gray-400 text-green-400')
+            await self._run_single_simulation(index)
+
+        self.status_label.text = f'Completed {total} simulations'
+        self.status_label.classes('text-green-400', remove='text-gray-400 text-yellow-400')
 
     async def _run_single_simulation(self, index: int):
         """Run a single simulation by index."""
