@@ -176,7 +176,9 @@ class SimulationGUI:
         with ui.card().classes('w-full'):
             with ui.row().classes('items-center justify-between mb-2'):
                 ui.label('Simulations').classes('text-lg font-bold')
-                ui.button(icon='add', on_click=self._add_new_simulation).props('flat dense').tooltip('New simulation')
+                with ui.row().classes('gap-1'):
+                    ui.button(icon='add', on_click=self._add_new_simulation).props('flat dense').tooltip('New simulation')
+                    ui.button(icon='playlist_add', on_click=self._show_batch_add_dialog).props('flat dense').tooltip('Batch add simulations')
             with ui.row().classes('items-center justify-between mb-2'):
                 ui.upload(
                     on_upload=self._load_simulation,
@@ -266,6 +268,223 @@ class SimulationGUI:
         self.editor_color = self._get_next_color()
         self.editor_line_style = 'solid'
         self._show_editor(f'Simulation {self.next_sim_id}')
+
+    def _show_batch_add_dialog(self):
+        """Show dialog for batch adding simulations with parameter sweeps."""
+        # State for batch configuration
+        batch_config = {
+            'modes': ['monolayer'],  # list of modes to include
+            'volumes': [100],  # media volumes in µL
+            'fluxes': [100],  # monolayer flux values
+            'rates': [5],  # suspension rates
+            'vol_start': 50,
+            'vol_end': 250,
+            'vol_step': 50,
+            'flux_start': 50,
+            'flux_end': 200,
+            'flux_step': 50,
+            'rate_start': 1,
+            'rate_end': 10,
+            'rate_step': 2,
+        }
+
+        with ui.dialog() as dialog, ui.card().classes('w-[500px]'):
+            ui.label('Batch Add Simulations').classes('text-lg font-bold mb-2')
+
+            # Mode selection
+            ui.label('Simulation Modes').classes('font-semibold text-blue-400')
+            mode_select = ui.select(
+                ['monolayer', 'suspension'],
+                value=batch_config['modes'],
+                multiple=True,
+                label='Include modes'
+            ).classes('w-full')
+
+            ui.separator()
+
+            # Media volume range
+            ui.label('Media Volume Range (µL)').classes('font-semibold text-blue-400')
+            with ui.row().classes('w-full gap-2'):
+                vol_start = ui.number('Start', value=batch_config['vol_start'], min=10, step=10).classes('w-24')
+                vol_end = ui.number('End', value=batch_config['vol_end'], min=10, step=10).classes('w-24')
+                vol_step = ui.number('Step', value=batch_config['vol_step'], min=5, step=5).classes('w-24')
+
+            vol_preview = ui.label('').classes('text-xs text-gray-400')
+
+            def update_vol_preview():
+                start, end, step = vol_start.value, vol_end.value, vol_step.value
+                if start and end and step and step > 0:
+                    vals = list(range(int(start), int(end) + 1, int(step)))
+                    vol_preview.text = f'Values: {vals}'
+            vol_start.on('update:model-value', lambda: update_vol_preview())
+            vol_end.on('update:model-value', lambda: update_vol_preview())
+            vol_step.on('update:model-value', lambda: update_vol_preview())
+            update_vol_preview()
+
+            ui.separator()
+
+            # Monolayer flux range
+            ui.label('Monolayer Flux Range (fmol/mm²/s)').classes('font-semibold text-blue-400')
+            with ui.row().classes('w-full gap-2'):
+                flux_start = ui.number('Start', value=batch_config['flux_start'], min=1, step=10).classes('w-24')
+                flux_end = ui.number('End', value=batch_config['flux_end'], min=1, step=10).classes('w-24')
+                flux_step = ui.number('Step', value=batch_config['flux_step'], min=5, step=5).classes('w-24')
+
+            flux_preview = ui.label('').classes('text-xs text-gray-400')
+
+            def update_flux_preview():
+                start, end, step = flux_start.value, flux_end.value, flux_step.value
+                if start and end and step and step > 0:
+                    vals = list(range(int(start), int(end) + 1, int(step)))
+                    flux_preview.text = f'Values: {vals}'
+            flux_start.on('update:model-value', lambda: update_flux_preview())
+            flux_end.on('update:model-value', lambda: update_flux_preview())
+            flux_step.on('update:model-value', lambda: update_flux_preview())
+            update_flux_preview()
+
+            ui.separator()
+
+            # Suspension rate range
+            ui.label('Suspension Rate Range (µM/min)').classes('font-semibold text-blue-400')
+            with ui.row().classes('w-full gap-2'):
+                rate_start = ui.number('Start', value=batch_config['rate_start'], min=0.1, step=1).classes('w-24')
+                rate_end = ui.number('End', value=batch_config['rate_end'], min=0.1, step=1).classes('w-24')
+                rate_step = ui.number('Step', value=batch_config['rate_step'], min=0.5, step=0.5).classes('w-24')
+
+            rate_preview = ui.label('').classes('text-xs text-gray-400')
+
+            def update_rate_preview():
+                start, end, step = rate_start.value, rate_end.value, rate_step.value
+                if start and end and step and step > 0:
+                    vals = []
+                    v = start
+                    while v <= end + 0.001:
+                        vals.append(round(v, 1))
+                        v += step
+                    rate_preview.text = f'Values: {vals}'
+            rate_start.on('update:model-value', lambda: update_rate_preview())
+            rate_end.on('update:model-value', lambda: update_rate_preview())
+            rate_step.on('update:model-value', lambda: update_rate_preview())
+            update_rate_preview()
+
+            ui.separator()
+
+            # Summary and actions
+            summary_label = ui.label('').classes('text-sm')
+
+            def update_summary():
+                modes = mode_select.value or []
+                n_vols = len(range(int(vol_start.value or 0), int(vol_end.value or 0) + 1, int(vol_step.value or 1))) if vol_step.value else 0
+                n_fluxes = len(range(int(flux_start.value or 0), int(flux_end.value or 0) + 1, int(flux_step.value or 1))) if flux_step.value else 0
+                n_rates = 0
+                if rate_step.value and rate_step.value > 0:
+                    v = rate_start.value or 0
+                    while v <= (rate_end.value or 0) + 0.001:
+                        n_rates += 1
+                        v += rate_step.value
+
+                total = 0
+                if 'monolayer' in modes:
+                    total += n_vols * n_fluxes
+                if 'suspension' in modes:
+                    total += n_vols * n_rates
+                summary_label.text = f'Will create {total} simulations'
+
+            mode_select.on('update:model-value', lambda: update_summary())
+            vol_start.on('update:model-value', lambda: update_summary())
+            vol_end.on('update:model-value', lambda: update_summary())
+            vol_step.on('update:model-value', lambda: update_summary())
+            flux_start.on('update:model-value', lambda: update_summary())
+            flux_end.on('update:model-value', lambda: update_summary())
+            flux_step.on('update:model-value', lambda: update_summary())
+            rate_start.on('update:model-value', lambda: update_summary())
+            rate_end.on('update:model-value', lambda: update_summary())
+            rate_step.on('update:model-value', lambda: update_summary())
+            update_summary()
+
+            with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                ui.button('Cancel', on_click=dialog.close).props('flat')
+
+                async def generate_and_close():
+                    await self._generate_batch_simulations(
+                        modes=mode_select.value or [],
+                        vol_start=vol_start.value,
+                        vol_end=vol_end.value,
+                        vol_step=vol_step.value,
+                        flux_start=flux_start.value,
+                        flux_end=flux_end.value,
+                        flux_step=flux_step.value,
+                        rate_start=rate_start.value,
+                        rate_end=rate_end.value,
+                        rate_step=rate_step.value,
+                    )
+                    dialog.close()
+
+                ui.button('Generate', on_click=generate_and_close).props('color=primary')
+
+        dialog.open()
+
+    async def _generate_batch_simulations(self, modes, vol_start, vol_end, vol_step,
+                                          flux_start, flux_end, flux_step,
+                                          rate_start, rate_end, rate_step):
+        """Generate batch simulations from parameter ranges."""
+        # Generate volume values
+        volumes = list(range(int(vol_start), int(vol_end) + 1, int(vol_step)))
+
+        # Generate flux values for monolayer
+        fluxes = list(range(int(flux_start), int(flux_end) + 1, int(flux_step)))
+
+        # Generate rate values for suspension
+        rates = []
+        v = rate_start
+        while v <= rate_end + 0.001:
+            rates.append(round(v, 1))
+            v += rate_step
+
+        base_config = self._default_config()
+        created = 0
+
+        # Generate monolayer simulations
+        if 'monolayer' in modes:
+            for vol in volumes:
+                for flux in fluxes:
+                    config = base_config.copy()
+                    config['mode'] = 'monolayer'
+                    config['media_vol'] = float(vol)
+                    config['flux'] = float(flux)
+
+                    sim = SimulationEntry(
+                        name=f'Mono {vol}µL {flux}fmol',
+                        config_values=config,
+                        color=self._get_next_color(),
+                        line_style='solid'
+                    )
+                    self.simulations.append(sim)
+                    self.next_sim_id += 1
+                    created += 1
+
+        # Generate suspension simulations
+        if 'suspension' in modes:
+            for vol in volumes:
+                for rate in rates:
+                    config = base_config.copy()
+                    config['mode'] = 'suspension'
+                    config['media_vol'] = float(vol)
+                    config['rate'] = float(rate)
+
+                    sim = SimulationEntry(
+                        name=f'Susp {vol}µL {rate}µM/min',
+                        config_values=config,
+                        color=self._get_next_color(),
+                        line_style='solid'
+                    )
+                    self.simulations.append(sim)
+                    self.next_sim_id += 1
+                    created += 1
+
+        self._refresh_sim_list()
+        self.status_label.text = f'Created {created} simulations'
+        self.status_label.classes('text-green-400', remove='text-gray-400 text-yellow-400')
 
     def _edit_simulation(self, index: int):
         """Edit an existing simulation."""
