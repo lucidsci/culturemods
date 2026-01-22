@@ -1585,7 +1585,9 @@ def main():
     assets_path = Path(__file__).parent.parent.parent / 'assets'
     app.add_static_files('/assets', assets_path)
 
-    ui.run(title='O₂ Diffusion Simulator', port=8081, reload=False)
+
+    favicon=assets_path.joinpath('logo_gradient_small.png')
+    ui.run(title='O₂ Diffusion Simulator', port=8081, reload=False, favicon=favicon)
 
 
 if __name__ in {'__main__', '__mp_main__'}:
