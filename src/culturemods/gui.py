@@ -119,7 +119,6 @@ class SimulationGUI:
             'C_air': 200.0,
 
             # Suspension mode parameters
-            'L': 3.1,
             'nz': 100,
             'rate': 10,  # umolar / min
             'k1': 0.0,
@@ -386,12 +385,26 @@ class SimulationGUI:
     def _build_suspension_params(self):
         """Build suspension mode parameters."""
         ui.number(
-            'Well depth L (mm)',
-            value=self.editor_values['L'],
-            format='%.2f',
-            step=0.1,
-            on_change=lambda e: self._update_editor('L', e.value)
+            'Media volume (µL)',
+            value=self.editor_values.get('media_vol', 100.0),
+            format='%.1f',
+            step=10, min=10,
+            on_change=lambda e: self._update_editor('media_vol', e.value)
         ).classes('w-full')
+
+        ui.number(
+            'Well radius (mm)',
+            value=self.editor_values.get('well_radius', 3.2),
+            format='%.2f',
+            step=0.1, min=0.5,
+            on_change=lambda e: self._update_editor('well_radius', e.value)
+        ).classes('w-full')
+
+        # Show calculated media height
+        vol = self.editor_values.get('media_vol', 100.0)
+        radius = self.editor_values.get('well_radius', 3.2)
+        height = kinetics.media_vol_to_height(vol, radius)
+        ui.label(f'Media height: {height:.2f} mm').classes('text-sm text-gray-400')
 
         ui.number(
             'Mesh points (nz)',
@@ -666,7 +679,11 @@ class SimulationGUI:
     def _create_config_from_values(self, values: dict) -> SimulationConfig:
         """Create SimulationConfig from config values dict."""
         C_air = values['C_air']
-        L = values['L']
+
+        # Calculate media height from volume and well radius
+        media_vol = values.get('media_vol', 100.0)
+        well_radius = values.get('well_radius', 3.2)
+        L = kinetics.media_vol_to_height(media_vol, well_radius)
 
         # Convert volumetric reaction rate - umolar/min to umolar/s
         rate_umolar_per_s = values['rate']/60
@@ -888,7 +905,7 @@ class SimulationGUI:
         # Timeseries plot card
         with ui.card().classes('w-full'):
             with ui.row().classes('items-center gap-4 mb-2'):
-                self.timeseries_title = ui.label('O₂ Concentration @ Probe Height vs Time').classes('text-lg font-bold')
+                self.timeseries_title = ui.label('O₂ @ Probe Height vs Time').classes('text-lg font-bold')
                 ui.toggle(
                     {'concentration': 'Conc', 'rate': 'dC/dt'},
                     value=self.timeseries_mode,
@@ -937,9 +954,9 @@ class SimulationGUI:
         self.timeseries_mode = e.value
         # Update title
         if self.timeseries_mode == 'concentration':
-            self.timeseries_title.text = 'O₂ Concentration @ Probe Height vs Time'
+            self.timeseries_title.text = 'O₂ @ Probe Height vs Time'
         else:
-            self.timeseries_title.text = 'O₂ Rate of Change @ Probe Height vs Time'
+            self.timeseries_title.text = 'O₂ Change @ Probe Height vs Time'
         self._update_timeseries_plot()
 
     def _on_step_change(self, e):
