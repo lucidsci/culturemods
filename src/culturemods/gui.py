@@ -521,6 +521,74 @@ class SimulationGUI:
 
         dialog.open()
 
+    def _create_style_mappings(self, volumes: list, fluxes: list, rates: list,
+                                style_mapping: str = 'vol_line') -> dict:
+        """Create color and line style mappings based on style_mapping preference.
+
+        Args:
+            volumes: List of media volumes
+            fluxes: List of flux values (for monolayer)
+            rates: List of rate values (for suspension)
+            style_mapping: 'vol_line' = line style differentiates volume, color differentiates rate
+                          'rate_line' = line style differentiates rate, color differentiates volume
+
+        Returns:
+            Dictionary with mapping functions for vol, flux, and rate to color/style
+        """
+        line_style_names = list(LINE_STYLES.keys())  # ['solid', 'dash', 'dot', 'dashdot']
+
+        if style_mapping == 'vol_line':
+            # Line style = volume, Color = consumption rate
+            return {
+                'vol_to_style': {vol: line_style_names[i % len(line_style_names)] for i, vol in enumerate(volumes)},
+                'vol_to_color': None,
+                'flux_to_color': {flux: COLORS[i % len(COLORS)] for i, flux in enumerate(fluxes)} if fluxes else None,
+                'flux_to_style': None,
+                'rate_to_color': {rate: COLORS[i % len(COLORS)] for i, rate in enumerate(rates)} if rates else None,
+                'rate_to_style': None,
+            }
+        else:
+            # Line style = consumption rate, Color = volume
+            return {
+                'vol_to_style': None,
+                'vol_to_color': {vol: COLORS[i % len(COLORS)] for i, vol in enumerate(volumes)},
+                'flux_to_color': None,
+                'flux_to_style': {flux: line_style_names[i % len(line_style_names)] for i, flux in enumerate(fluxes)} if fluxes else None,
+                'rate_to_color': None,
+                'rate_to_style': {rate: line_style_names[i % len(line_style_names)] for i, rate in enumerate(rates)} if rates else None,
+            }
+
+    def _get_sim_style(self, mappings: dict, vol, flux=None, rate=None) -> tuple[str, str]:
+        """Get color and line_style for a simulation based on mappings.
+
+        Args:
+            mappings: Dictionary from _create_style_mappings
+            vol: Media volume value
+            flux: Flux value (for monolayer, None for suspension)
+            rate: Rate value (for suspension, None for monolayer)
+
+        Returns:
+            Tuple of (color, line_style)
+        """
+        if flux is not None:
+            # Monolayer mode
+            if mappings['vol_to_style']:
+                color = mappings['flux_to_color'][flux]
+                line_style = mappings['vol_to_style'][vol]
+            else:
+                color = mappings['vol_to_color'][vol]
+                line_style = mappings['flux_to_style'][flux]
+        else:
+            # Suspension mode
+            if mappings['vol_to_style']:
+                color = mappings['rate_to_color'][rate]
+                line_style = mappings['vol_to_style'][vol]
+            else:
+                color = mappings['vol_to_color'][vol]
+                line_style = mappings['rate_to_style'][rate]
+
+        return color, line_style
+
     async def _generate_batch_simulations(self, modes, vol_start, vol_end, vol_step,
                                           flux_start, flux_end, flux_step,
                                           rate_start, rate_end, rate_step,
@@ -545,25 +613,8 @@ class SimulationGUI:
             rates.append(round(v, 1))
             v += rate_step
 
-        # Create style mappings based on user selection
-        line_style_names = list(LINE_STYLES.keys())  # ['solid', 'dash', 'dot', 'dashdot']
-
-        if style_mapping == 'vol_line':
-            # Line style = volume, Color = consumption rate
-            vol_to_style = {vol: line_style_names[i % len(line_style_names)] for i, vol in enumerate(volumes)}
-            vol_to_color = None
-            flux_to_color = {flux: COLORS[i % len(COLORS)] for i, flux in enumerate(fluxes)}
-            flux_to_style = None
-            rate_to_color = {rate: COLORS[i % len(COLORS)] for i, rate in enumerate(rates)}
-            rate_to_style = None
-        else:
-            # Line style = consumption rate, Color = volume
-            vol_to_style = None
-            vol_to_color = {vol: COLORS[i % len(COLORS)] for i, vol in enumerate(volumes)}
-            flux_to_color = None
-            flux_to_style = {flux: line_style_names[i % len(line_style_names)] for i, flux in enumerate(fluxes)}
-            rate_to_color = None
-            rate_to_style = {rate: line_style_names[i % len(line_style_names)] for i, rate in enumerate(rates)}
+        # Create style mappings
+        mappings = self._create_style_mappings(volumes, fluxes, rates, style_mapping)
 
         base_config = self._default_config()
         created = 0
@@ -582,13 +633,7 @@ class SimulationGUI:
                     config['flux'] = float(flux)
                     config['duration_hrs'] = float(duration_hrs)
 
-                    # Determine color and line style based on mapping
-                    if style_mapping == 'vol_line':
-                        color = flux_to_color[flux]
-                        line_style = vol_to_style[vol]
-                    else:
-                        color = vol_to_color[vol]
-                        line_style = flux_to_style[flux]
+                    color, line_style = self._get_sim_style(mappings, vol, flux=flux)
 
                     sim = SimulationEntry(
                         name=f'Mono {vol}µL {flux}fmol',
@@ -610,13 +655,7 @@ class SimulationGUI:
                     config['rate'] = float(rate)
                     config['steps'] = suspension_steps
 
-                    # Determine color and line style based on mapping
-                    if style_mapping == 'vol_line':
-                        color = rate_to_color[rate]
-                        line_style = vol_to_style[vol]
-                    else:
-                        color = vol_to_color[vol]
-                        line_style = rate_to_style[rate]
+                    color, line_style = self._get_sim_style(mappings, vol, rate=rate)
 
                     sim = SimulationEntry(
                         name=f'Susp {vol}µL {rate}µM/min',
@@ -643,41 +682,59 @@ class SimulationGUI:
 
         if preset == 'media_vol_eq':
             # Media volume equilibration: monolayer, volumes [75, 100, 150, 200], 100 fmol/mm²/s, 4 hours
+            # Color by volume, line style by flux (only one flux, so all solid)
             await self._generate_preset_simulations(
                 name_prefix='VolEq',
                 mode='monolayer',
                 volumes=[75, 100, 150, 200],
                 fluxes=[100],
                 rates=[],
-                duration_hrs=4.0
+                duration_hrs=4.0,
+                style_mapping='rate_line'  # volume determines color
             )
 
         elif preset == 'ocr_kinetics':
             # OCR kinetics: monolayer, 100 µL, OCR 20-160 fmol/mm²/s
+            # Color by OCR (flux), line style by volume (only one volume, so all solid)
             await self._generate_preset_simulations(
                 name_prefix='OCR',
                 mode='monolayer',
                 volumes=[100],
                 fluxes=[20, 40, 60, 80, 100, 120, 140, 160],
                 rates=[],
-                duration_hrs=4.0
+                duration_hrs=4.0,
+                style_mapping='vol_line'  # flux/OCR determines color
             )
 
         elif preset == 'rapid_reaction':
             # Rapid reaction: suspension, rates [5, 10] µM/min, volumes [100, 200] µL
+            # Color by rate, line style by volume
             await self._generate_preset_simulations(
                 name_prefix='Rapid',
                 mode='suspension',
                 volumes=[100, 200],
                 fluxes=[],
                 rates=[5.0, 10.0],
-                duration_hrs=1.0
+                duration_hrs=1.0,
+                style_mapping='vol_line'  # rate determines color
             )
 
     async def _generate_preset_simulations(self, name_prefix: str, mode: str,
                                             volumes: list, fluxes: list, rates: list,
-                                            duration_hrs: float):
-        """Generate simulations from a preset configuration."""
+                                            duration_hrs: float,
+                                            style_mapping: str = 'vol_line'):
+        """Generate simulations from a preset configuration.
+
+        Args:
+            name_prefix: Prefix for simulation names
+            mode: 'monolayer' or 'suspension'
+            volumes: List of media volumes
+            fluxes: List of flux values (for monolayer)
+            rates: List of rate values (for suspension)
+            duration_hrs: Simulation duration in hours
+            style_mapping: 'vol_line' = line style differentiates volume, color differentiates rate
+                          'rate_line' = line style differentiates rate, color differentiates volume
+        """
         base_config = self._default_config()
         created = 0
 
@@ -685,12 +742,10 @@ class SimulationGUI:
         dt = base_config.get('dt', 1.0)
         suspension_steps = int(duration_hrs * 3600 / dt)
 
-        # Create style mappings
-        line_style_names = list(LINE_STYLES.keys())
-        vol_to_style = {vol: line_style_names[i % len(line_style_names)] for i, vol in enumerate(volumes)}
+        # Create style mappings using shared helper
+        mappings = self._create_style_mappings(volumes, fluxes, rates, style_mapping)
 
         if mode == 'monolayer':
-            flux_to_color = {flux: COLORS[i % len(COLORS)] for i, flux in enumerate(fluxes)}
             for vol in volumes:
                 for flux in fluxes:
                     config = base_config.copy()
@@ -699,18 +754,19 @@ class SimulationGUI:
                     config['flux'] = float(flux)
                     config['duration_hrs'] = float(duration_hrs)
 
+                    color, line_style = self._get_sim_style(mappings, vol, flux=flux)
+
                     sim = SimulationEntry(
                         name=f'{name_prefix} {vol}µL {flux}fmol',
                         config_values=config,
-                        color=flux_to_color[flux],
-                        line_style=vol_to_style[vol]
+                        color=color,
+                        line_style=line_style
                     )
                     self.simulations.append(sim)
                     self.next_sim_id += 1
                     created += 1
 
         elif mode == 'suspension':
-            rate_to_color = {rate: COLORS[i % len(COLORS)] for i, rate in enumerate(rates)}
             for vol in volumes:
                 for rate in rates:
                     config = base_config.copy()
@@ -719,11 +775,13 @@ class SimulationGUI:
                     config['rate'] = float(rate)
                     config['steps'] = suspension_steps
 
+                    color, line_style = self._get_sim_style(mappings, vol, rate=rate)
+
                     sim = SimulationEntry(
                         name=f'{name_prefix} {vol}µL {rate}µM/min',
                         config_values=config,
-                        color=rate_to_color[rate],
-                        line_style=vol_to_style[vol]
+                        color=color,
+                        line_style=line_style
                     )
                     self.simulations.append(sim)
                     self.next_sim_id += 1
