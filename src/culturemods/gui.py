@@ -442,6 +442,18 @@ class SimulationGUI:
             rates.append(round(v, 1))
             v += rate_step
 
+        # Create consistent style mappings:
+        # - Line styles map to volumes (same volume = same dash style)
+        # - Colors map to consumption rates (flux/rate values)
+        line_style_names = list(LINE_STYLES.keys())  # ['solid', 'dash', 'dot', 'dashdot']
+        vol_to_style = {vol: line_style_names[i % len(line_style_names)] for i, vol in enumerate(volumes)}
+
+        # Map flux values to colors for monolayer
+        flux_to_color = {flux: COLORS[i % len(COLORS)] for i, flux in enumerate(fluxes)}
+
+        # Map rate values to colors for suspension
+        rate_to_color = {rate: COLORS[i % len(COLORS)] for i, rate in enumerate(rates)}
+
         base_config = self._default_config()
         created = 0
 
@@ -457,8 +469,8 @@ class SimulationGUI:
                     sim = SimulationEntry(
                         name=f'Mono {vol}µL {flux}fmol',
                         config_values=config,
-                        color=self._get_next_color(),
-                        line_style='solid'
+                        color=flux_to_color[flux],
+                        line_style=vol_to_style[vol]
                     )
                     self.simulations.append(sim)
                     self.next_sim_id += 1
@@ -476,8 +488,8 @@ class SimulationGUI:
                     sim = SimulationEntry(
                         name=f'Susp {vol}µL {rate}µM/min',
                         config_values=config,
-                        color=self._get_next_color(),
-                        line_style='solid'
+                        color=rate_to_color[rate],
+                        line_style=vol_to_style[vol]
                     )
                     self.simulations.append(sim)
                     self.next_sim_id += 1
