@@ -187,13 +187,11 @@ class SimulationGUI:
                     ui.button(icon='add', on_click=self._add_new_simulation).props('flat dense').tooltip('New simulation')
                     ui.button(icon='playlist_add', on_click=self._show_batch_add_dialog).props('flat dense').tooltip('Batch add simulations')
                     ui.button(icon='play_circle', on_click=self._run_all_simulations).props('flat dense').tooltip('Run all simulations')
-            with ui.row().classes('items-center justify-between mb-2'):
-                ui.upload(
-                    on_upload=self._load_simulation,
-                    auto_upload=True,
-                    multiple=True,
-                    label = "Upload saved",
-                ).props('flat dense accept=.json').classes('w-full').tooltip('Load simulations from file(s)')
+
+            # Status and progress
+            self.progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-full mt-2')
+            self.progress_bar.visible = False
+            self.status_label = ui.label('Ready').classes('text-sm text-gray-400')
 
             # Search filter and select/deselect buttons
             with ui.row().classes('w-full items-center gap-2 mb-2'):
@@ -207,16 +205,20 @@ class SimulationGUI:
             self.sim_list_container = ui.column().classes('w-full gap-1')
             self._refresh_sim_list()
 
-            # Status and progress
-            self.progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-full mt-2')
-            self.progress_bar.visible = False
-            self.status_label = ui.label('Ready').classes('text-sm text-gray-400')
 
         # Editor card (initially hidden)
         self.editor_card = ui.card().classes('w-full')
         self.editor_card.visible = False
         with self.editor_card:
             self.editor_container = ui.column().classes('w-full gap-2')
+
+        with ui.row().classes('items-center justify-between mb-2'):
+            ui.upload(
+                on_upload=self._load_simulation,
+                auto_upload=True,
+                multiple=True,
+                label = "Upload saved",
+            ).props('flat dense accept=.json').classes('w-full').tooltip('Load simulations from file(s)')
 
     def _refresh_sim_list(self):
         """Refresh the simulation list display."""
