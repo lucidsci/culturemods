@@ -370,6 +370,12 @@ class SimulationGUI:
 
             ui.separator()
 
+            # Simulation duration
+            ui.label('Simulation Duration').classes('font-semibold text-blue-400')
+            duration_hrs = ui.number('Duration (hours)', value=1.0, min=0.1, max=24, step=0.5).classes('w-full')
+
+            ui.separator()
+
             # Summary and actions
             summary_label = ui.label('').classes('text-sm')
 
@@ -418,6 +424,7 @@ class SimulationGUI:
                         rate_start=rate_start.value,
                         rate_end=rate_end.value,
                         rate_step=rate_step.value,
+                        duration_hrs=duration_hrs.value,
                     )
                     dialog.close()
 
@@ -427,7 +434,8 @@ class SimulationGUI:
 
     async def _generate_batch_simulations(self, modes, vol_start, vol_end, vol_step,
                                           flux_start, flux_end, flux_step,
-                                          rate_start, rate_end, rate_step):
+                                          rate_start, rate_end, rate_step,
+                                          duration_hrs=1.0):
         """Generate batch simulations from parameter ranges."""
         # Generate volume values
         volumes = list(range(int(vol_start), int(vol_end) + 1, int(vol_step)))
@@ -457,6 +465,10 @@ class SimulationGUI:
         base_config = self._default_config()
         created = 0
 
+        # Calculate suspension steps from duration (dt=1.0s default)
+        dt = base_config.get('dt', 1.0)
+        suspension_steps = int(duration_hrs * 3600 / dt)
+
         # Generate monolayer simulations
         if 'monolayer' in modes:
             for vol in volumes:
@@ -465,6 +477,7 @@ class SimulationGUI:
                     config['mode'] = 'monolayer'
                     config['media_vol'] = float(vol)
                     config['flux'] = float(flux)
+                    config['duration_hrs'] = float(duration_hrs)
 
                     sim = SimulationEntry(
                         name=f'Mono {vol}µL {flux}fmol',
@@ -484,6 +497,7 @@ class SimulationGUI:
                     config['mode'] = 'suspension'
                     config['media_vol'] = float(vol)
                     config['rate'] = float(rate)
+                    config['steps'] = suspension_steps
 
                     sim = SimulationEntry(
                         name=f'Susp {vol}µL {rate}µM/min',
