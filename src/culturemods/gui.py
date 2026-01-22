@@ -156,9 +156,9 @@ class SimulationGUI:
         self.dark = ui.dark_mode()
         self.dark.enable()
 
-        with ui.header().classes('items-center justify-between').style('background-color: #77b0c3'):
-            ui.image('assets/logo_gradient.png').style('height: 45px; width: 45px')
-            with ui.row().classes('items-center gap-3'):
+        with ui.header().classes('items-center justify-between').style('background-color: #77b0c3; padding-top: 0px; padding-bottom:0px'):
+            ui.image('assets/logo_gradient_small.png').style('height: 60px; width: 60px')
+            with ui.row().classes('items-center gap-2'):
                 ui.label('Culture Well O₂ Diffusion-Reaction Simulator').classes('text-2xl font-bold')
             with ui.row().classes('items-center gap-2'):
                 ui.icon('light_mode').classes('text-yellow-400')
