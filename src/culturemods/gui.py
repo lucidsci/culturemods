@@ -90,6 +90,9 @@ class SimulationGUI:
         # Theme
         self.dark_mode = True
 
+        # Search/filter
+        self.search_filter = ''
+
         # UI element references
         self.timeseries_plot = None
         self.profile_plot = None
@@ -99,6 +102,7 @@ class SimulationGUI:
         self.heatmap_select = None
         self.progress_bar = None
         self.sim_list_container = None
+        self.search_input = None
         self.editor_container = None
         self.editor_card = None
         self.dark_mode_toggle = None
@@ -188,6 +192,15 @@ class SimulationGUI:
                     label = "Upload saved",
                 ).props('flat dense accept=.json').classes('w-full').tooltip('Load simulations from file(s)')
 
+            # Search filter and select/deselect buttons
+            with ui.row().classes('w-full items-center gap-2 mb-2'):
+                self.search_input = ui.input(
+                    placeholder='Filter simulations...',
+                    on_change=self._on_search_change
+                ).props('dense clearable').classes('flex-grow')
+                ui.button(icon='check_box', on_click=self._select_all_visible).props('flat dense').tooltip('Select all visible')
+                ui.button(icon='check_box_outline_blank', on_click=self._deselect_all_visible).props('flat dense').tooltip('Deselect all visible')
+
             self.sim_list_container = ui.column().classes('w-full gap-1')
             self._refresh_sim_list()
 
@@ -209,8 +222,18 @@ class SimulationGUI:
             if not self.simulations:
                 ui.label('No simulations yet. Click + to add one.').classes('text-sm text-gray-400 italic')
             else:
+                # Filter simulations based on search text
+                filter_text = self.search_filter.lower().strip()
+                visible_count = 0
                 for i, sim in enumerate(self.simulations):
+                    if filter_text and filter_text not in sim.name.lower():
+                        continue
                     self._build_sim_list_item(i, sim)
+                    visible_count += 1
+
+                # Show message if filter hides all items
+                if visible_count == 0 and filter_text:
+                    ui.label(f'No simulations matching "{self.search_filter}"').classes('text-sm text-gray-400 italic')
 
     def _build_sim_list_item(self, index: int, sim: SimulationEntry):
         """Build a single simulation list item."""
@@ -244,6 +267,36 @@ class SimulationGUI:
     def _toggle_visibility(self, index: int, visible: bool):
         """Toggle simulation visibility."""
         self.simulations[index].visible = visible
+        self._update_timeseries_plot()
+        self._update_profile_plot()
+
+    def _on_search_change(self, e):
+        """Handle search filter change."""
+        self.search_filter = e.value or ''
+        self._refresh_sim_list()
+
+    def _get_filtered_indices(self) -> list[int]:
+        """Get indices of simulations matching the current search filter."""
+        filter_text = self.search_filter.lower().strip()
+        indices = []
+        for i, sim in enumerate(self.simulations):
+            if not filter_text or filter_text in sim.name.lower():
+                indices.append(i)
+        return indices
+
+    def _select_all_visible(self):
+        """Select (make visible in plots) all simulations matching the current filter."""
+        for i in self._get_filtered_indices():
+            self.simulations[i].visible = True
+        self._refresh_sim_list()
+        self._update_timeseries_plot()
+        self._update_profile_plot()
+
+    def _deselect_all_visible(self):
+        """Deselect (hide in plots) all simulations matching the current filter."""
+        for i in self._get_filtered_indices():
+            self.simulations[i].visible = False
+        self._refresh_sim_list()
         self._update_timeseries_plot()
         self._update_profile_plot()
 
