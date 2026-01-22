@@ -165,13 +165,13 @@ class SimulationGUI:
                 )
                 ui.icon('dark_mode').classes('text-blue-400')
 
-        with ui.row().classes('w-full gap-4 p-4'):
-            # Left panel - Simulations list and editor
-            with ui.column().classes('w-96 gap-4'):
+        with ui.row().classes('w-full gap-4 p-4 flex-nowrap'):
+            # Left panel - Simulations list and editor (fixed width, doesn't shrink)
+            with ui.column().classes('w-96 shrink-0 gap-4'):
                 self._build_simulations_panel()
 
-            # Right panel - Visualization
-            with ui.column().classes('flex-grow gap-4'):
+            # Right panel - Visualization (grows and shrinks with available space)
+            with ui.column().classes('flex-grow min-w-0 gap-4'):
                 self._build_visualization_panel()
 
     def _build_simulations_panel(self):
@@ -429,6 +429,18 @@ class SimulationGUI:
 
             ui.separator()
 
+            # Style mapping configuration
+            ui.label('Style Differentiation').classes('font-semibold text-blue-400')
+            style_mapping = ui.toggle(
+                {
+                    'vol_line': 'Line=Volume, Color=Rate',
+                    'rate_line': 'Line=Rate, Color=Volume',
+                },
+                value='vol_line'
+            ).classes('w-full')
+
+            ui.separator()
+
             # Summary and actions
             summary_label = ui.label('').classes('text-sm')
 
@@ -478,6 +490,7 @@ class SimulationGUI:
                         rate_end=rate_end.value,
                         rate_step=rate_step.value,
                         duration_hrs=duration_hrs.value,
+                        style_mapping=style_mapping.value,
                     )
                     dialog.close()
 
@@ -488,8 +501,14 @@ class SimulationGUI:
     async def _generate_batch_simulations(self, modes, vol_start, vol_end, vol_step,
                                           flux_start, flux_end, flux_step,
                                           rate_start, rate_end, rate_step,
-                                          duration_hrs=1.0):
-        """Generate batch simulations from parameter ranges."""
+                                          duration_hrs=1.0,
+                                          style_mapping='vol_line'):
+        """Generate batch simulations from parameter ranges.
+
+        Args:
+            style_mapping: 'vol_line' = line style differentiates volume, color differentiates rate
+                          'rate_line' = line style differentiates rate, color differentiates volume
+        """
         # Generate volume values
         volumes = list(range(int(vol_start), int(vol_end) + 1, int(vol_step)))
 
@@ -503,17 +522,25 @@ class SimulationGUI:
             rates.append(round(v, 1))
             v += rate_step
 
-        # Create consistent style mappings:
-        # - Line styles map to volumes (same volume = same dash style)
-        # - Colors map to consumption rates (flux/rate values)
+        # Create style mappings based on user selection
         line_style_names = list(LINE_STYLES.keys())  # ['solid', 'dash', 'dot', 'dashdot']
-        vol_to_style = {vol: line_style_names[i % len(line_style_names)] for i, vol in enumerate(volumes)}
 
-        # Map flux values to colors for monolayer
-        flux_to_color = {flux: COLORS[i % len(COLORS)] for i, flux in enumerate(fluxes)}
-
-        # Map rate values to colors for suspension
-        rate_to_color = {rate: COLORS[i % len(COLORS)] for i, rate in enumerate(rates)}
+        if style_mapping == 'vol_line':
+            # Line style = volume, Color = consumption rate
+            vol_to_style = {vol: line_style_names[i % len(line_style_names)] for i, vol in enumerate(volumes)}
+            vol_to_color = None
+            flux_to_color = {flux: COLORS[i % len(COLORS)] for i, flux in enumerate(fluxes)}
+            flux_to_style = None
+            rate_to_color = {rate: COLORS[i % len(COLORS)] for i, rate in enumerate(rates)}
+            rate_to_style = None
+        else:
+            # Line style = consumption rate, Color = volume
+            vol_to_style = None
+            vol_to_color = {vol: COLORS[i % len(COLORS)] for i, vol in enumerate(volumes)}
+            flux_to_color = None
+            flux_to_style = {flux: line_style_names[i % len(line_style_names)] for i, flux in enumerate(fluxes)}
+            rate_to_color = None
+            rate_to_style = {rate: line_style_names[i % len(line_style_names)] for i, rate in enumerate(rates)}
 
         base_config = self._default_config()
         created = 0
@@ -532,11 +559,19 @@ class SimulationGUI:
                     config['flux'] = float(flux)
                     config['duration_hrs'] = float(duration_hrs)
 
+                    # Determine color and line style based on mapping
+                    if style_mapping == 'vol_line':
+                        color = flux_to_color[flux]
+                        line_style = vol_to_style[vol]
+                    else:
+                        color = vol_to_color[vol]
+                        line_style = flux_to_style[flux]
+
                     sim = SimulationEntry(
                         name=f'Mono {vol}µL {flux}fmol',
                         config_values=config,
-                        color=flux_to_color[flux],
-                        line_style=vol_to_style[vol]
+                        color=color,
+                        line_style=line_style
                     )
                     self.simulations.append(sim)
                     self.next_sim_id += 1
@@ -552,11 +587,19 @@ class SimulationGUI:
                     config['rate'] = float(rate)
                     config['steps'] = suspension_steps
 
+                    # Determine color and line style based on mapping
+                    if style_mapping == 'vol_line':
+                        color = rate_to_color[rate]
+                        line_style = vol_to_style[vol]
+                    else:
+                        color = vol_to_color[vol]
+                        line_style = rate_to_style[rate]
+
                     sim = SimulationEntry(
                         name=f'Susp {vol}µL {rate}µM/min',
                         config_values=config,
-                        color=rate_to_color[rate],
-                        line_style=vol_to_style[vol]
+                        color=color,
+                        line_style=line_style
                     )
                     self.simulations.append(sim)
                     self.next_sim_id += 1
@@ -1224,8 +1267,8 @@ class SimulationGUI:
     def _build_visualization_panel(self):
         """Build the visualization panel with plots."""
         # Timeseries plot card
-        with ui.card().classes('w-full'):
-            with ui.row().classes('items-center gap-4 mb-2'):
+        with ui.card().classes('w-full min-w-0 overflow-hidden'):
+            with ui.row().classes('items-center gap-4 mb-2 flex-wrap'):
                 self.timeseries_title = ui.label('O₂ @ Probe Height vs Time').classes('text-lg font-bold')
                 ui.toggle(
                     {'concentration': 'Conc', 'rate': 'dC/dt'},
@@ -1242,8 +1285,8 @@ class SimulationGUI:
             self.timeseries_plot = ui.plotly({}).classes('w-full h-[400px]')
 
         # Profile plot card
-        with ui.card().classes('w-full'):
-            with ui.row().classes('items-center gap-4 mb-2'):
+        with ui.card().classes('w-full min-w-0 overflow-hidden'):
+            with ui.row().classes('items-center gap-4 mb-2 flex-wrap'):
                 ui.label('Vertical Concentration Profile').classes('text-lg font-bold')
                 ui.label('Time step:').classes('text-sm')
                 self.step_slider = ui.slider(
@@ -1251,7 +1294,7 @@ class SimulationGUI:
                     on_change=self._on_step_change
                 ).classes('w-48')
                 self.step_label = ui.label('Step 0 (0.0 s)').classes('text-sm w-32')
-            with ui.row().classes('items-center gap-4 mb-2'):
+            with ui.row().classes('items-center gap-4 mb-2 flex-wrap'):
                 ui.label('Gradient Profile:').classes('text-sm')
                 self.heatmap_select = ui.select(
                     options=[],
