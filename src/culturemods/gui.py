@@ -188,6 +188,20 @@ class SimulationGUI:
                     ui.button(icon='playlist_add', on_click=self._show_batch_add_dialog).props('flat dense').tooltip('Batch add simulations')
                     ui.button(icon='play_circle', on_click=self._run_all_simulations).props('flat dense').tooltip('Run all simulations')
 
+            # Preset examples dropdown
+            with ui.row().classes('w-full items-center gap-2 mb-2'):
+                ui.label('Load preset:').classes('text-sm')
+                ui.select(
+                    options={
+                        '': '-- Select --',
+                        'media_vol_eq': 'Media volume equilibration',
+                        'ocr_kinetics': 'OCR kinetics',
+                        'rapid_reaction': 'Rapid reaction',
+                    },
+                    value='',
+                    on_change=self._load_preset_batch
+                ).props('dense').classes('flex-grow')
+
             # Status and progress
             self.progress_bar = ui.linear_progress(value=0, show_value=False).classes('w-full mt-2')
             self.progress_bar.visible = False
@@ -612,6 +626,107 @@ class SimulationGUI:
 
         self._refresh_sim_list()
         self.status_label.text = f'Created {created} simulations'
+        self.status_label.classes('text-green-400', remove='text-gray-400 text-yellow-400')
+
+    async def _load_preset_batch(self, e):
+        """Load a predefined batch of simulations."""
+        preset = e.value
+        if not preset:
+            return
+
+        # Reset the select to blank after loading
+        e.sender.value = ''
+
+        if preset == 'media_vol_eq':
+            # Media volume equilibration: monolayer, volumes [75, 100, 150, 200], 100 fmol/mm²/s, 4 hours
+            await self._generate_preset_simulations(
+                name_prefix='VolEq',
+                mode='monolayer',
+                volumes=[75, 100, 150, 200],
+                fluxes=[100],
+                rates=[],
+                duration_hrs=4.0
+            )
+
+        elif preset == 'ocr_kinetics':
+            # OCR kinetics: monolayer, 100 µL, OCR 20-160 fmol/mm²/s
+            await self._generate_preset_simulations(
+                name_prefix='OCR',
+                mode='monolayer',
+                volumes=[100],
+                fluxes=[20, 40, 60, 80, 100, 120, 140, 160],
+                rates=[],
+                duration_hrs=4.0
+            )
+
+        elif preset == 'rapid_reaction':
+            # Rapid reaction: suspension, rates [5, 10] µM/min, volumes [100, 200] µL
+            await self._generate_preset_simulations(
+                name_prefix='Rapid',
+                mode='suspension',
+                volumes=[100, 200],
+                fluxes=[],
+                rates=[5.0, 10.0],
+                duration_hrs=1.0
+            )
+
+    async def _generate_preset_simulations(self, name_prefix: str, mode: str,
+                                            volumes: list, fluxes: list, rates: list,
+                                            duration_hrs: float):
+        """Generate simulations from a preset configuration."""
+        base_config = self._default_config()
+        created = 0
+
+        # Calculate suspension steps from duration
+        dt = base_config.get('dt', 1.0)
+        suspension_steps = int(duration_hrs * 3600 / dt)
+
+        # Create style mappings
+        line_style_names = list(LINE_STYLES.keys())
+        vol_to_style = {vol: line_style_names[i % len(line_style_names)] for i, vol in enumerate(volumes)}
+
+        if mode == 'monolayer':
+            flux_to_color = {flux: COLORS[i % len(COLORS)] for i, flux in enumerate(fluxes)}
+            for vol in volumes:
+                for flux in fluxes:
+                    config = base_config.copy()
+                    config['mode'] = 'monolayer'
+                    config['media_vol'] = float(vol)
+                    config['flux'] = float(flux)
+                    config['duration_hrs'] = float(duration_hrs)
+
+                    sim = SimulationEntry(
+                        name=f'{name_prefix} {vol}µL {flux}fmol',
+                        config_values=config,
+                        color=flux_to_color[flux],
+                        line_style=vol_to_style[vol]
+                    )
+                    self.simulations.append(sim)
+                    self.next_sim_id += 1
+                    created += 1
+
+        elif mode == 'suspension':
+            rate_to_color = {rate: COLORS[i % len(COLORS)] for i, rate in enumerate(rates)}
+            for vol in volumes:
+                for rate in rates:
+                    config = base_config.copy()
+                    config['mode'] = 'suspension'
+                    config['media_vol'] = float(vol)
+                    config['rate'] = float(rate)
+                    config['steps'] = suspension_steps
+
+                    sim = SimulationEntry(
+                        name=f'{name_prefix} {vol}µL {rate}µM/min',
+                        config_values=config,
+                        color=rate_to_color[rate],
+                        line_style=vol_to_style[vol]
+                    )
+                    self.simulations.append(sim)
+                    self.next_sim_id += 1
+                    created += 1
+
+        self._refresh_sim_list()
+        self.status_label.text = f'Loaded preset: {created} simulations'
         self.status_label.classes('text-green-400', remove='text-gray-400 text-yellow-400')
 
     def _edit_simulation(self, index: int):
