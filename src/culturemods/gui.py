@@ -17,6 +17,18 @@ from datetime import datetime
 from culturemods.rxd_fipy_1d import SimulationConfig, SimulationResult, run_simulation
 from culturemods import kinetics
 
+#FIXME - move to utility module
+def calculate_discrete_rate_at_heights(df):
+    time_col = 't_s'
+    height_col = 'z_idx'
+    df = df.sort_values([height_col, time_col])  # Important: sort first!
+
+    # Calculate derivative each per-height time series
+    dt = df.groupby(height_col)['t_s'].diff()
+    dC = df.groupby(height_col)['C'].diff()
+    df['discrete_rate'] = -60 * dC / dt #umolar per min decrease
+    return df
+
 
 # Color palette for multiple simulations
 COLORS = [
@@ -73,6 +85,7 @@ class SimulationGUI:
         self.probe_height_mm = 1.0
         self.profile_step = 0
         self.heatmap_sim_name = None  # Which simulation to use for heatmap (None = first visible)
+        self.timeseries_mode = 'concentration'  # 'concentration' or 'rate'
 
         # Theme
         self.dark_mode = True
@@ -629,6 +642,9 @@ class SimulationGUI:
                 sim.result = SimulationResult.__new__(SimulationResult)
                 sim.result.__setstate__(data['result'])
                 sim.df = sim.result.to_dataframe()
+                #FIXME - support for old dataframes without discrete_rate
+                #FIXME - this shouldn't be done in gui module
+                sim.df = calculate_discrete_rate_at_heights(sim.df)
 
             self.simulations.append(sim)
             self.next_sim_id += 1
@@ -736,6 +752,8 @@ class SimulationGUI:
         self.progress_bar.value = 1.0
 
         sim.df = sim.result.to_dataframe()
+        #FIXME - this shouldn't be done in gui module
+        sim.df = calculate_discrete_rate_at_heights(sim.df)
 
     async def _run_monolayer_simulation(self, sim: SimulationEntry):
         """Run a monolayer mode simulation using kinetics.py analytical solution."""
@@ -766,6 +784,7 @@ class SimulationGUI:
         dz = media_height / nz
 
         progress_timer = ui.timer(0.1, self._update_progress)
+
 
         # Run simulation in background
         def run_kinetics():
@@ -799,6 +818,12 @@ class SimulationGUI:
 
         # Create DataFrame directly (no SimulationResult for monolayer)
         sim.df = pd.DataFrame(points)
+
+        #FIXME - this shouldn't be done in gui module
+        sim.df = calculate_discrete_rate_at_heights(sim.df)
+
+        #FIXME - unify this simulation result with SimulationResult class fromr xd_fipy_1d in
+        # a cleaner way
 
         # Create a minimal result object for compatibility
         # Store config info needed for plotting
@@ -863,7 +888,12 @@ class SimulationGUI:
         # Timeseries plot card
         with ui.card().classes('w-full'):
             with ui.row().classes('items-center gap-4 mb-2'):
-                ui.label('O₂ Concentration vs Time').classes('text-lg font-bold')
+                self.timeseries_title = ui.label('O₂ Concentration @ Probe Height vs Time').classes('text-lg font-bold')
+                ui.toggle(
+                    {'concentration': 'Conc', 'rate': 'dC/dt'},
+                    value=self.timeseries_mode,
+                    on_change=self._on_timeseries_mode_change
+                ).props('dense')
                 ui.label('Probe height:').classes('text-sm')
                 self.probe_slider = ui.slider(
                     min=0, max=3.1, step=0.1, value=self.probe_height_mm,
@@ -902,6 +932,16 @@ class SimulationGUI:
         self.probe_label.text = f'{self.probe_height_mm:.1f} mm'
         self._update_timeseries_plot()
 
+    def _on_timeseries_mode_change(self, e):
+        """Handle timeseries mode toggle between concentration and rate."""
+        self.timeseries_mode = e.value
+        # Update title
+        if self.timeseries_mode == 'concentration':
+            self.timeseries_title.text = 'O₂ Concentration @ Probe Height vs Time'
+        else:
+            self.timeseries_title.text = 'O₂ Rate of Change @ Probe Height vs Time'
+        self._update_timeseries_plot()
+
     def _on_step_change(self, e):
         """Handle step slider change."""
         self.profile_step = int(e.value)
@@ -938,16 +978,20 @@ class SimulationGUI:
         """Update the timeseries plot with all visible simulations."""
         fig = go.Figure()
         template = self._get_plot_template()
+        show_rate = self.timeseries_mode == 'rate'
 
         visible_sims = [s for s in self.simulations if s.visible and s.df is not None]
+
+        y_label = 'dC/dt (µM/min)' if show_rate else 'O₂ Concentration (µM)'
+        y_col = 'discrete_rate' if show_rate else 'C'
 
         if not visible_sims:
             fig.update_layout(
                 template=template,
                 margin=dict(l=60, r=20, t=30, b=50),
                 xaxis_title='Time (minutes)',
-                yaxis_title='O₂ Concentration (µM)',
-                yaxis=dict(range=[0, 220]),
+                yaxis_title=y_label,
+                yaxis=dict(range=[0, 220] if not show_rate else None),
             )
             fig.add_annotation(
                 text="Add and run simulations to see results",
@@ -958,7 +1002,8 @@ class SimulationGUI:
             self.timeseries_plot.update_figure(fig)
             return
 
-        c_max = 0
+        y_max = 0
+        y_min = 0
         c_air_max = 0
 
         for sim in visible_sims:
@@ -971,30 +1016,49 @@ class SimulationGUI:
             # Get line dash style
             dash = LINE_STYLES.get(sim.line_style)
 
+            # Get y values, handling missing discrete_rate column
+            if y_col in df_probe.columns:
+                y_values = df_probe[y_col]
+            else:
+                y_values = df_probe['C']
+
             fig.add_trace(go.Scatter(
                 x=df_probe['t_mins'],
-                y=df_probe['C'],
+                y=y_values,
                 mode='lines',
                 name=sim.name,
                 line=dict(color=sim.color, width=2, dash=dash)
             ))
 
-            c_max = max(c_max, sim.df['C'].max())
+            if y_col in sim.df.columns:
+                col_values = sim.df[y_col].dropna()
+                if len(col_values) > 0:
+                    y_max = max(y_max, col_values.max())
+                    y_min = min(y_min, col_values.min())
             c_air_max = max(c_air_max, config.C_air)
+
+        # Set y-axis range
+        if show_rate:
+            # For rate, center around zero with some padding
+            y_range = [y_min * 1.1 if y_min < 0 else y_min - 0.1,
+                       y_max * 1.1 if y_max > 0 else 0.1]
+        else:
+            y_range = [-0.1, max(y_max, c_air_max) * 1.1]
 
         fig.update_layout(
             template=template,
             margin=dict(l=60, r=20, t=30, b=50),
             xaxis_title='Time (minutes)',
-            yaxis_title='O₂ Concentration (µM)',
-            yaxis=dict(range=[-0.1, max(c_max, c_air_max) * 1.1]),
+            yaxis_title=y_label,
+            yaxis=dict(range=y_range),
             showlegend=True,
             legend=dict(x=0.02, y=0.98),
         )
 
-        # Add C_air reference line (use max C_air)
-        fig.add_hline(y=c_air_max, line_dash="dash", line_color="gray",
-                      annotation_text=f"C_air = {c_air_max} µM")
+        # Add C_air reference line only for concentration mode
+        if not show_rate:
+            fig.add_hline(y=c_air_max, line_dash="dash", line_color="gray",
+                          annotation_text=f"C_air = {c_air_max} µM")
 
         self.timeseries_plot.update_figure(fig)
 
