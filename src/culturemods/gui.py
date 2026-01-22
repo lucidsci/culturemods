@@ -187,6 +187,7 @@ class SimulationGUI:
                     ui.button(icon='add', on_click=self._add_new_simulation).props('flat dense').tooltip('New simulation')
                     ui.button(icon='playlist_add', on_click=self._show_batch_add_dialog).props('flat dense').tooltip('Batch add simulations')
                     ui.button(icon='play_circle', on_click=self._run_all_simulations).props('flat dense').tooltip('Run all simulations')
+                    ui.button(icon='delete_sweep', on_click=self._confirm_delete_all).props('flat dense color=red').tooltip('Delete all simulations')
 
             # Preset examples dropdown
             with ui.row().classes('w-full items-center gap-2 mb-2'):
@@ -286,6 +287,7 @@ class SimulationGUI:
     def _toggle_visibility(self, index: int, visible: bool):
         """Toggle simulation visibility."""
         self.simulations[index].visible = visible
+        self._update_heatmap_select_options()
         self._update_timeseries_plot()
         self._update_profile_plot()
 
@@ -308,6 +310,7 @@ class SimulationGUI:
         for i in self._get_filtered_indices():
             self.simulations[i].visible = True
         self._refresh_sim_list()
+        self._update_heatmap_select_options()
         self._update_timeseries_plot()
         self._update_profile_plot()
 
@@ -316,6 +319,7 @@ class SimulationGUI:
         for i in self._get_filtered_indices():
             self.simulations[i].visible = False
         self._refresh_sim_list()
+        self._update_heatmap_select_options()
         self._update_timeseries_plot()
         self._update_profile_plot()
 
@@ -1060,6 +1064,36 @@ class SimulationGUI:
         self._update_timeseries_plot()
         self._update_profile_plot()
 
+    def _confirm_delete_all(self):
+        """Show confirmation dialog before deleting all simulations."""
+        if not self.simulations:
+            self.status_label.text = 'No simulations to delete'
+            self.status_label.classes('text-yellow-400', remove='text-gray-400 text-green-400')
+            return
+
+        with ui.dialog() as dialog, ui.card():
+            ui.label('Delete All Simulations?').classes('text-lg font-bold')
+            ui.label(f'This will permanently delete all {len(self.simulations)} simulations.').classes('text-sm text-gray-400')
+
+            with ui.row().classes('w-full justify-end gap-2 mt-4'):
+                ui.button('Cancel', on_click=dialog.close).props('flat')
+                ui.button('Delete All', on_click=lambda: self._delete_all_simulations(dialog)).props('color=red')
+
+        dialog.open()
+
+    def _delete_all_simulations(self, dialog):
+        """Delete all simulations."""
+        count = len(self.simulations)
+        self.simulations.clear()
+        self.next_sim_id = 1
+        self._refresh_sim_list()
+        self._update_heatmap_select_options()
+        self._update_timeseries_plot()
+        self._update_profile_plot()
+        dialog.close()
+        self.status_label.text = f'Deleted {count} simulations'
+        self.status_label.classes('text-green-400', remove='text-gray-400 text-yellow-400')
+
     def _save_single_simulation(self, index: int):
         """Save a single simulation to JSON file."""
         sim = self.simulations[index]
@@ -1464,8 +1498,8 @@ class SimulationGUI:
         if not self.heatmap_select:
             return
 
-        # Get list of simulations with results
-        options = {sim.name: sim.name for sim in self.simulations if sim.result is not None}
+        # Get list of visible simulations with results
+        options = {sim.name: sim.name for sim in self.simulations if sim.result is not None and sim.visible}
 
         self.heatmap_select.options = options
         self.heatmap_select.update()
