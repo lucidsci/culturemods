@@ -4,7 +4,8 @@ NiceGUI application for configuring, running, and visualizing
 Supports multiple simulations with comparison visualization.
 """
 
-from nicegui import ui, run, events
+from nicegui import ui, run, events, app
+from pathlib import Path
 import asyncio
 import numpy as np
 import plotly.graph_objects as go
@@ -155,8 +156,10 @@ class SimulationGUI:
         self.dark = ui.dark_mode()
         self.dark.enable()
 
-        with ui.header().classes('items-center justify-between'):
-            ui.label('Culture Well O₂ Diffusion-Reaction Simulator').classes('text-2xl font-bold')
+        with ui.header().classes('items-center justify-between').style('background-color: #77b0c3'):
+            ui.image('assets/logo_gradient.png').style('height: 45px; width: 45px')
+            with ui.row().classes('items-center gap-3'):
+                ui.label('Culture Well O₂ Diffusion-Reaction Simulator').classes('text-2xl font-bold')
             with ui.row().classes('items-center gap-2'):
                 ui.icon('light_mode').classes('text-yellow-400')
                 self.dark_mode_toggle = ui.switch(
@@ -1570,12 +1573,16 @@ class SimulationGUI:
 @ui.page('/')
 def index():
     """Main page."""
-    app = SimulationGUI()
-    app.build_ui()
+    gui = SimulationGUI()
+    gui.build_ui()
 
 
 def main():
     """Main entry point."""
+    # Serve static assets (logo, etc.)
+    assets_path = Path(__file__).parent.parent.parent / 'assets'
+    app.add_static_files('/assets', assets_path)
+
     ui.run(title='O₂ Diffusion Simulator', port=8081, reload=False)
 
 
