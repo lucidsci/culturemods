@@ -198,6 +198,7 @@ class SimulationGUI:
                         'media_vol_eq': 'Media volume equilibration',
                         'ocr_kinetics': 'OCR kinetics',
                         'rapid_reaction': 'Rapid reaction',
+                        'rapid_reaction_sealed': 'Rapid reaction (sealed)',
                     },
                     value='',
                     on_change=self._load_preset_batch
@@ -715,14 +716,28 @@ class SimulationGUI:
                 volumes=[100, 200],
                 fluxes=[],
                 rates=[5.0, 10.0],
-                duration_hrs=1.0,
-                style_mapping='vol_line'  # rate determines color
+                duration_hrs=0.5,
+                style_mapping='vol_line',
+            )
+
+        elif preset == 'rapid_reaction_sealed':
+            # Rapid reaction: suspension, rates [5, 10] µM/min, volumes [100, 200] µL
+            # Color by rate, line style by volume
+            await self._generate_preset_simulations(
+                name_prefix='Rapid',
+                mode='suspension',
+                volumes=[100], #volume with sealed doesnt matter
+                fluxes=[],
+                rates=[5.0, 10.0],
+                duration_hrs=0.5,
+                style_mapping='vol_line',
+                sealed = True
             )
 
     async def _generate_preset_simulations(self, name_prefix: str, mode: str,
                                             volumes: list, fluxes: list, rates: list,
                                             duration_hrs: float,
-                                            style_mapping: str = 'vol_line'):
+                                           style_mapping: str = 'vol_line', sealed: bool = False):
         """Generate simulations from a preset configuration.
 
         Args:
@@ -774,11 +789,14 @@ class SimulationGUI:
                     config['media_vol'] = float(vol)
                     config['rate'] = float(rate)
                     config['steps'] = suspension_steps
+                    config['top_constraint'] = 'sealed' if sealed else 'open'
 
                     color, line_style = self._get_sim_style(mappings, vol, rate=rate)
 
+                    vol_str = f'{vol}µL' if not sealed else 'sealed'
+                    name=f'{name_prefix} {vol_str} {rate}µM/min'
                     sim = SimulationEntry(
-                        name=f'{name_prefix} {vol}µL {rate}µM/min',
+                        name=name,
                         config_values=config,
                         color=color,
                         line_style=line_style
