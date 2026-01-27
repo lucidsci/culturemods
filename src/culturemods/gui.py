@@ -199,6 +199,7 @@ class SimulationGUI:
                         'ocr_kinetics': 'OCR kinetics',
                         'rapid_reaction': 'Rapid reaction',
                         'rapid_reaction_sealed': 'Rapid reaction (sealed)',
+                        'ecoli_densities_100uL': 'E. coli densities @ 100 uL'
                     },
                     value='',
                     on_change=self._load_preset_batch
@@ -733,11 +734,27 @@ class SimulationGUI:
                 style_mapping='vol_line',
                 sealed = True
             )
+        elif preset == 'ecoli_densities_100uL':
+            # Rapid reaction: suspension, rates [5, 10] µM/min, volumes [100, 200] µL
+            # Color by rate, line style by volume
+            await self._generate_preset_simulations(
+                name_prefix='Rapid',
+                mode='suspension',
+                volumes=[100],
+                fluxes=[],
+                rates=[2, 4, 8, 16],
+                duration_hrs=0.5,
+                style_mapping='vol_line',
+                sealed = False,
+                D=2.2e-3,
+                C_air=170,
+            )
 
     async def _generate_preset_simulations(self, name_prefix: str, mode: str,
                                             volumes: list, fluxes: list, rates: list,
                                             duration_hrs: float,
-                                           style_mapping: str = 'vol_line', sealed: bool = False):
+                                           style_mapping: str = 'vol_line', sealed: bool = False,
+                                            **extra_config_params):
         """Generate simulations from a preset configuration.
 
         Args:
@@ -769,13 +786,14 @@ class SimulationGUI:
                     config['flux'] = float(flux)
                     config['duration_hrs'] = float(duration_hrs)
 
+                    config.update(extra_config_params)
                     color, line_style = self._get_sim_style(mappings, vol, flux=flux)
 
                     sim = SimulationEntry(
                         name=f'{name_prefix} {vol}µL {flux}fmol',
                         config_values=config,
                         color=color,
-                        line_style=line_style
+                        line_style=line_style,
                     )
                     self.simulations.append(sim)
                     self.next_sim_id += 1
@@ -790,6 +808,7 @@ class SimulationGUI:
                     config['rate'] = float(rate)
                     config['steps'] = suspension_steps
                     config['top_constraint'] = 'sealed' if sealed else 'open'
+                    config.update(extra_config_params)
 
                     color, line_style = self._get_sim_style(mappings, vol, rate=rate)
 
