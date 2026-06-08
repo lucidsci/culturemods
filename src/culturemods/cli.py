@@ -8,6 +8,7 @@ import math
 import click
 import matplotlib
 import matplotlib.pyplot as plt
+import pandas as pd
 import seaborn as sns
 
 from culturemods import kinetics
@@ -141,6 +142,93 @@ def o2_at_position_by_ocr(ocrs, position=1.25, vol=100, csat=185):
 
     plt.legend()
     plt.title(f"O2 at {position}mm above cells by OCR in {vol} µL")
+    plt.show()
+
+
+@cmds.command()
+@click.option('--ocrs', default="100,150,200,250", help='Comma-separated OCR values in fmol/mm²/s')
+@click.option('--vols', default="75,100,150,200", help='Comma-separated media volumes in µL')
+@click.option('--position', default=1.25, help='Position above bottom in mm')
+@click.option('--csat', default=185, type=int, help='Saturated O2 concentration in µM')
+def o2_at_position_by_ocr_and_vol(ocrs, vols, position=1.25, csat=185):
+    """Plot O2 at a specific position for the cross product of OCR and media volumes."""
+    ocrs = [int(o) for o in ocrs.split(",")]
+    vols = [int(v) for v in vols.split(",")]
+
+    for ocr in ocrs:
+        q = kinetics.flux_units_convert(ocr)
+        for vol in vols:
+            height = media_vol_to_height(vol)
+            ts = list(range(0, 3600 * 4, 1))
+            cs = [kinetics.concentration(position, t, q, c_initial=csat, media_height=height) for t in ts]
+            plt.plot([t / 3600 for t in ts], cs, label=f"OCR={ocr}, vol={vol}µL")
+
+    plt.xlabel("Time (hours)")
+    plt.ylabel("O2 (µM)")
+    plt.ylim(0, csat)
+    plt.legend()
+    plt.title(f"O2 at {position}mm above cells by OCR and volume")
+    plt.show()
+
+
+@cmds.command()
+@click.option('--vol-min', default=50, type=int, help='Minimum media volume in µL')
+@click.option('--vol-max', default=200, type=int, help='Maximum media volume in µL')
+@click.option('--vol-step', default=10, type=int, help='Media volume step in µL')
+@click.option('--positions', default="1,1.25,1.5",
+              help='Comma-separated positions above bottom in mm')
+@click.option('--csat', default=185, type=int, help='Saturated O2 concentration in µM')
+@click.option('--table-format', default='csv',
+              type=click.Choice(['csv', 'tsv', 'markdown', 'json', 'string']),
+              help='Format for the printed data table')
+def o2_at_position_by_vol_max_ocr(vol_min=50, vol_max=200, vol_step=10, positions="1,1.25,1.5",
+                                  csat=185, table_format='csv'):
+    """Plot steady-state O2 at positions vs volume, each using its max sustainable OCR."""
+    vols = list(range(vol_min, vol_max + 1, vol_step))
+    positions = [float(p) for p in positions.split(",")]
+
+    ocrs = [kinetics.max_flux(vol, sat=csat) for vol in vols]
+    rows = []
+    for position in positions:
+        for vol, ocr in zip(vols, ocrs):
+            height = media_vol_to_height(vol)
+            o2 = kinetics.steady_state_o2_at_pos(
+                ocr, o2_sat=csat, media_height=height, pos_above_bottom=position
+            )
+            rows.append({
+                "position_mm": position,
+                "volume_uL": vol,
+                "max_ocr_fmol_mm2_s": ocr,
+                "steady_state_o2_uM": o2,
+            })
+
+    df = pd.DataFrame(rows)
+    table_printers = {
+        "csv": lambda d: d.to_csv(index=False),
+        "tsv": lambda d: d.to_csv(index=False, sep="\t"),
+        "markdown": lambda d: d.to_markdown(index=False),
+        "json": lambda d: d.to_json(orient="records", indent=2),
+        "string": lambda d: d.to_string(index=False),
+    }
+    print(table_printers[table_format](df))
+
+    ax = plt.gca()
+    for position in positions:
+        sub = df[df["position_mm"] == position]
+        ax.plot(sub["volume_uL"], sub["steady_state_o2_uM"], 'o-', label=f"{position}mm")
+    ax.set_xlabel("Media volume (µL)")
+    ax.set_ylabel("Steady-state O2 (µM)")
+    ax.set_ylim(0, csat)
+    ax.legend(title="Position above cells")
+
+    # Secondary x-axis: max OCR corresponding to each media volume
+    ax2 = ax.twiny()
+    ax2.set_xlim(ax.get_xlim())
+    ax2.set_xticks(vols)
+    ax2.set_xticklabels([f"{ocr:.0f}" for ocr in ocrs])
+    ax2.set_xlabel("Max OCR (fmol/mm²/s)")
+
+    plt.title("Steady-state O2 above cells by volume at max OCR")
     plt.show()
 
 
